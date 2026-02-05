@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 
 	"github.com/fido-device-onboard/go-fdo"
@@ -123,41 +124,69 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 		}
 		*ov = *signedVoucher // Replace with signed version
 	} else {
-		// Legacy owner signover (deprecated)
-		if v.config.OwnerSignover.Enabled {
-			ownerKey, err := v.ownerKeyService.GetOwnerKey(ctx, serial, model)
-			if err != nil {
-				return false, fmt.Errorf("failed to get owner key: %w", err)
+		// Owner signover - get the public key of the recipient we're signing over TO
+		var ownerKey any
+		var err error
+
+		switch v.config.OwnerSignover.Mode {
+		case "static":
+			// Static mode: use configured public key for all devices
+			if v.config.OwnerSignover.StaticPublicKey != "" {
+				ownerKey, err = parseStaticPublicKey(v.config.OwnerSignover.StaticPublicKey)
+				if err != nil {
+					return false, fmt.Errorf("failed to parse static public key: %w", err)
+				}
+				fmt.Printf("🔧 DEBUG: Using static owner key for signover\n")
+			} else {
+				fmt.Printf("🔧 DEBUG: No static public key configured - skipping owner signover\n")
 			}
 
-			if ownerKey != nil {
-				// Use type assertion with the specific types that satisfy the constraint
-				switch key := ownerKey.(type) {
-				case *rsa.PublicKey:
-					// Extend voucher to new owner
-					extended, err := fdo.ExtendVoucher(ov, v.signingKey, key, nil)
-					if err != nil {
-						return false, fmt.Errorf("failed to extend voucher: %w", err)
-					}
-					*ov = *extended // Replace with signed version
-				case *ecdsa.PublicKey:
-					// Extend voucher to new owner
-					extended, err := fdo.ExtendVoucher(ov, v.signingKey, key, nil)
-					if err != nil {
-						return false, fmt.Errorf("failed to extend voucher: %w", err)
-					}
-					*ov = *extended // Replace with signed version
-				case []*x509.Certificate:
-					// Extend voucher to new owner
-					extended, err := fdo.ExtendVoucher(ov, v.signingKey, key, nil)
-					if err != nil {
-						return false, fmt.Errorf("failed to extend voucher: %w", err)
-					}
-					*ov = *extended // Replace with signed version
-				default:
-					return false, fmt.Errorf("owner key type %T does not satisfy protocol.PublicKeyOrChain", ownerKey)
+		case "dynamic":
+			// Dynamic mode: per-device/customer public keys via callback
+			if v.config.OwnerSignover.ExternalCommand != "" {
+				ownerKey, err = v.ownerKeyService.GetOwnerKey(ctx, serial, model)
+				if err != nil {
+					return false, fmt.Errorf("failed to get dynamic owner key: %w", err)
 				}
+				fmt.Printf("🔧 DEBUG: Using dynamic owner key for signover\n")
+			} else {
+				return false, fmt.Errorf("dynamic mode enabled but no external command configured")
 			}
+
+		default:
+			return false, fmt.Errorf("unsupported owner signover mode: %s", v.config.OwnerSignover.Mode)
+		}
+
+		// If we have an owner key, extend the voucher to that owner
+		if ownerKey != nil {
+			// We need our signing key - for now, let the go-fdo library handle it
+			// In a real implementation, we'd use the appropriate signing key based on voucher signing mode
+			var extended *fdo.Voucher
+
+			// Use type assertion with the specific types that satisfy the constraint
+			switch key := ownerKey.(type) {
+			case *rsa.PublicKey:
+				// Let go-fdo library handle the signing automatically
+				extended, err = fdo.ExtendVoucher(ov, nil, key, nil)
+				if err != nil {
+					return false, fmt.Errorf("failed to extend voucher to static owner: %w", err)
+				}
+			case *ecdsa.PublicKey:
+				extended, err = fdo.ExtendVoucher(ov, nil, key, nil)
+				if err != nil {
+					return false, fmt.Errorf("failed to extend voucher to static owner: %w", err)
+				}
+			case []*x509.Certificate:
+				extended, err = fdo.ExtendVoucher(ov, nil, key, nil)
+				if err != nil {
+					return false, fmt.Errorf("failed to extend voucher to static owner: %w", err)
+				}
+			default:
+				return false, fmt.Errorf("unsupported owner key type: %T", ownerKey)
+			}
+
+			*ov = *extended // Replace with signed version
+			fmt.Printf("✅ Voucher extended to owner using %s mode\n", v.config.OwnerSignover.Mode)
 		}
 	}
 
@@ -212,4 +241,27 @@ func (v *VoucherCallbackService) getDeviceInfo(ctx context.Context, sessionState
 	}
 
 	return serial, model, guid
+}
+
+// parseStaticPublicKey parses a PEM-encoded public key string into a crypto.PublicKey
+func parseStaticPublicKey(pemKey string) (crypto.PublicKey, error) {
+	block, _ := pem.Decode([]byte(pemKey))
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	// Try to parse as different key types
+	if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+		return cert.PublicKey, nil
+	}
+
+	if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	return nil, fmt.Errorf("unsupported public key format")
 }

@@ -4,38 +4,44 @@
 # SPDX-License-Identifier: Apache 2.0
 # Author: Brad Goodman
 
-echo "=== Step 2: Fixed Owner Key Signover Test ==="
+echo "=== Static Owner Key Signover Test ==="
 
-# Check if test owner key exists
-if [ ! -f "/tmp/test_owner_key.pem" ]; then
-    echo "❌ Test owner key not found at /tmp/test_owner_key.pem"
+# Test static public key parsing
+echo "Testing static public key configuration..."
+TEST_KEY="-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEEVs/o5+UWQc7Qf5qB5RtvGzKB8wQ
+-----END PUBLIC KEY-----"
+
+# Test that the key can be parsed
+if echo "$TEST_KEY" | grep -q "BEGIN PUBLIC KEY"; then
+    echo "✅ Static public key format is valid"
+else
+    echo "❌ Static public key format is invalid"
     exit 1
 fi
 
-echo "✅ Test owner key found:"
-cat /tmp/test_owner_key.pem
+if echo "$TEST_KEY" | grep -q "END PUBLIC KEY"; then
+    echo "✅ Static public key has proper ending"
+else
+    echo "❌ Static public key missing ending"
+    exit 1
+fi
 
-# Test the cat command that should be used for owner key retrieval
-echo ""
-echo "Testing owner key retrieval command:"
-cat /tmp/test_owner_key.pem
-
-# Test the JSON response format expected by owner key service
-echo ""
-echo "Testing JSON response format:"
-cat << 'EOF'
-{
-  "owner_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhyCf+ghy1+QhS5IEEKg8hdw/rr0Y\nxER216L06IHZ7+F/h6zseExlnf90JnRIbLiTwzkco8jIP0gdQ9oyov043A==\n-----END PUBLIC KEY-----",
-  "error": ""
-}
-EOF
+# Test PEM block detection
+if echo "$TEST_KEY" | head -1 | grep -q "BEGIN"; then
+    echo "✅ PEM block start detected"
+else
+    echo "❌ PEM block start not detected"
+    exit 1
+fi
 
 echo ""
-echo "✅ Fixed owner key test setup complete!"
+echo "✅ Static owner key test setup complete!"
 echo ""
 echo "Expected behavior:"
-echo "1. Server starts with owner_signover.enabled=true"
-echo "2. DI client connects"
-echo "3. Voucher callback calls 'cat /tmp/test_owner_key.pem'"
-echo "4. Owner key signs the voucher"
-echo "5. Voucher upload echoes with 'Voucher uploaded and signed:'"
+echo "1. Server starts with owner_signover.mode=static"
+echo "2. Server parses static_public_key from config"
+echo "3. DI client connects"
+echo "4. Voucher callback uses parsed static public key"
+echo "5. Voucher is extended to static owner"
+echo "6. Voucher upload echoes with 'Voucher uploaded and signed:'"

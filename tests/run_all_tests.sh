@@ -42,11 +42,12 @@ run_test() {
     fi
 }
 
-# Run all 12 tests
+# Run all 14 tests
 run_test "Basic Tests" "tests/test_basic.sh"
 run_test "Echo Tests" "tests/test_echo.sh"
 run_test "Fixed Owner" "tests/test_fixed_owner.sh"
 run_test "Dynamic Owner" "tests/test_dynamic_owner.sh"
+run_test "CBOR Encoding" "tests/test_cbor_encoding.sh"
 run_test "HSM Mock" "tests/test_hsm_mock.sh"
 run_test "HSM Simple" "tests/test_hsm_simple.sh"
 run_test "Mock HSM" "tests/test_mock_hsm.sh"

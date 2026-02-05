@@ -310,6 +310,21 @@ voucher_management:
     # OR Internal Key Configuration
     first_time_init: true
     
+  # Owner signover configuration (who we sign vouchers TO)
+  owner_signover:
+    # SIGNOVER MODE: Choose one of the configurations below
+    mode: "static"  # "static" | "dynamic"
+    
+    # Static Mode Configuration
+    static_public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEC3DE6...
+      -----END PUBLIC KEY-----
+    
+    # OR Dynamic Mode Configuration  
+    external_command: "bash /factory/scripts/get_owner_key.sh {serial} {model}"
+    timeout: "10s"
+    
   # OVEExtra data integration
   ove_extra_data:
     enabled: true
@@ -365,12 +380,49 @@ voucher_management:
   voucher_signing:
     mode: "internal"
     first_time_init: true
+  owner_signover:
+    mode: "static"
+    static_public_key: ""  # No owner signover in dev
   ove_extra_data:
     enabled: false
   save_to_disk:
     directory: "/tmp/test_vouchers"
   voucher_upload:
     enabled: false
+```
+
+#### **🏢 Corporate HQ (Static Owner Signover)**
+
+```yaml
+voucher_management:
+  voucher_signing:
+    mode: "internal"
+    first_time_init: true
+  owner_signover:
+    mode: "static"
+    static_public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEC3DE6...
+      -----END PUBLIC KEY-----
+  voucher_upload:
+    enabled: true
+    external_command: "curl -X POST https://corp-vault.example.com/api/vouchers -d @-"
+```
+
+#### **🏭 Multi-Customer Factory (Dynamic Owner Signover)**
+
+```yaml
+voucher_management:
+  voucher_signing:
+    mode: "external"
+    external_command: "bash /factory/hsm/sign_digest.sh {requestfile} {requestid} {station}"
+  owner_signover:
+    mode: "dynamic"
+    external_command: "bash /factory/erp/get_customer_owner_key.sh {serial} {model}"
+    timeout: "10s"
+  ove_extra_data:
+    enabled: true
+    external_command: "python3 /factory/integration/get_device_data.py {serial}"
 ```
 
 #### **📦 Batch Manufacturing (Static Owner)**
@@ -421,6 +473,20 @@ voucher_management:
 - **Default**: `internal` mode is used by default with `first_time_init: true` to create keys on first boot
 
 **Note**: `external` and `hsm` modes are functionally identical - `external` is kept for backward compatibility.
+
+#### **Owner Signover Modes**
+
+| Mode | Description | Use Case | Configuration |
+|------|-------------|----------|-------------|
+| `static` | Single public key for all devices | Corporate HQ, single owner | `static_public_key` with PEM key |
+| `dynamic` | Per-device/customer public keys | Multi-customer factory | `external_command` callback |
+
+**Owner Signover Concepts:**
+
+- **Static Mode**: All vouchers are signed over to the same public key (e.g., corporate voucher system)
+- **Dynamic Mode**: Each device can be signed over to different public keys based on customer/device
+- **Public Key Format**: PEM-encoded public key or certificate
+- **Callback Variables**: `{serial}`, `{model}` for dynamic mode
 
 #### **Supported Key Types**
 

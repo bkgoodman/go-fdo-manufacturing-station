@@ -103,11 +103,13 @@ func DefaultConfig() *Config {
 				ExternalTimeout: 30 * time.Second, // for hsm mode
 			},
 			OwnerSignover: struct {
-				Enabled         bool          `yaml:"enabled"`
-				ExternalCommand string        `yaml:"external_command"`
+				Mode            string        `yaml:"mode"`              // "static" or "dynamic"
+				StaticPublicKey string        `yaml:"static_public_key"` // PEM-encoded public key for static mode
+				ExternalCommand string        `yaml:"external_command"`  // Command for dynamic mode
 				Timeout         time.Duration `yaml:"timeout"`
 			}{
-				Enabled:         false,
+				Mode:            "static", // Default to static mode
+				StaticPublicKey: "",       // Empty means no owner signover
 				ExternalCommand: "",
 				Timeout:         10 * time.Second,
 			},

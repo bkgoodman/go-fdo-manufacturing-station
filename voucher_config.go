@@ -40,10 +40,11 @@ type VoucherConfig struct {
 		Directory string `yaml:"directory"` // Directory to save vouchers (empty = disabled)
 	} `yaml:"save_to_disk"`
 
-	// Legacy owner signover (deprecated)
+	// Owner signover configuration
 	OwnerSignover struct {
-		Enabled         bool          `yaml:"enabled"`
-		ExternalCommand string        `yaml:"external_command"`
+		Mode            string        `yaml:"mode"`              // "static" or "dynamic"
+		StaticPublicKey string        `yaml:"static_public_key"` // PEM-encoded public key for static mode
+		ExternalCommand string        `yaml:"external_command"`  // Command for dynamic mode
 		Timeout         time.Duration `yaml:"timeout"`
 	} `yaml:"owner_signover"`
 
