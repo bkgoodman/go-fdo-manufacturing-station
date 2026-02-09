@@ -55,9 +55,10 @@ type HSMInfo struct {
 
 // VoucherSigningService handles voucher signing operations
 type VoucherSigningService struct {
-	config    *VoucherSigningConfig
-	executor  *ExternalCommandExecutor
-	stationID string
+	config       *VoucherSigningConfig
+	executor     *ExternalCommandExecutor
+	stationID    string
+	sessionState interface{} // For accessing manufacturer keys
 }
 
 // NewVoucherSigningService creates a new voucher signing service
@@ -67,6 +68,11 @@ func NewVoucherSigningService(config *VoucherSigningConfig, executor *ExternalCo
 		executor:  executor,
 		stationID: stationID,
 	}
+}
+
+// SetSessionState sets the session state for accessing manufacturer keys
+func (s *VoucherSigningService) SetSessionState(sessionState interface{}) {
+	s.sessionState = sessionState
 }
 
 // SignVoucher signs a voucher based on the configured mode
@@ -84,17 +90,72 @@ func (s *VoucherSigningService) SignVoucher(ctx context.Context, voucher *fdo.Vo
 }
 
 // signVoucherInternal signs voucher using internal owner key
-// This is the same as the default behavior - let the go-fdo library handle it
+// This uses the manufacturer key from the database to extend the voucher to the nextOwner
 func (s *VoucherSigningService) signVoucherInternal(ctx context.Context, voucher *fdo.Voucher, nextOwner crypto.PublicKey, extraData map[int][]byte) (*fdo.Voucher, error) {
-	fmt.Printf("🔧 Internal voucher signing - letting go-fdo library handle it automatically\n")
+	fmt.Printf("🔧 Internal voucher signing - extending voucher to next owner\n")
 	fmt.Printf("📋 OVEExtra data keys: %d\n", len(extraData))
 	for key, value := range extraData {
 		fmt.Printf("   Key %d: %d bytes\n", key, len(value))
 	}
 
-	// Internal signing is the same as default behavior - return voucher unchanged
-	// The go-fdo library will handle the actual voucher extension and signing
-	return voucher, nil
+	// For internal mode, we need to get the manufacturer private key from the database
+	// and use it to extend the voucher to the next owner
+	manufacturerKey, err := s.getManufacturerKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get manufacturer key for internal signing: %w", err)
+	}
+
+	if manufacturerKey == nil {
+		return nil, fmt.Errorf("no manufacturer key available for internal signing")
+	}
+
+	fmt.Printf("🔐 Using manufacturer key to extend voucher to next owner\n")
+
+	// Use fdo.ExtendVoucher with the manufacturer key and next owner
+	var extendedVoucher *fdo.Voucher
+
+	// Type assert nextOwner to satisfy protocol.PublicKeyOrChain constraint
+	switch key := nextOwner.(type) {
+	case *ecdsa.PublicKey:
+		extendedVoucher, err = fdo.ExtendVoucher(voucher, manufacturerKey, key, extraData)
+	case *rsa.PublicKey:
+		extendedVoucher, err = fdo.ExtendVoucher(voucher, manufacturerKey, key, extraData)
+	case []*x509.Certificate:
+		extendedVoucher, err = fdo.ExtendVoucher(voucher, manufacturerKey, key, extraData)
+	default:
+		return nil, fmt.Errorf("unsupported nextOwner key type: %T", nextOwner)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to extend voucher with internal signing: %w", err)
+	}
+
+	fmt.Printf("✅ Voucher extended successfully using internal manufacturer key\n")
+	return extendedVoucher, nil
+}
+
+// getManufacturerKey retrieves the manufacturer private key from the session state
+func (s *VoucherSigningService) getManufacturerKey(ctx context.Context) (crypto.Signer, error) {
+	if s.sessionState == nil {
+		return nil, fmt.Errorf("no session state available")
+	}
+
+	// Type assert to get the ManufacturerKey method
+	// This uses the same interface as in main.go
+	state, ok := s.sessionState.(interface {
+		ManufacturerKey(ctx context.Context, keyType protocol.KeyType, rsaBits int) (crypto.Signer, []*x509.Certificate, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("session state does not support ManufacturerKey method")
+	}
+
+	// Get ECDSA P-384 manufacturer key (same as used in main.go)
+	manufacturerKey, _, err := state.ManufacturerKey(ctx, protocol.Secp384r1KeyType, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get manufacturer key: %w", err)
+	}
+
+	return manufacturerKey, nil
 }
 
 // signVoucherExternal signs voucher using external service (legacy compatibility)

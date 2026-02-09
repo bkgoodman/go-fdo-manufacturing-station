@@ -41,7 +41,21 @@ rendezvous:
     #   scheme: "http"
 
 # Voucher management configuration
+
 voucher_management:
   persist_to_db: true
   voucher_signing:
-    mode: ""
+    mode: "internal"
+    first_time_init: true
+  save_to_disk:
+    directory: "/tmp/test_vouchers"
+  owner_signover:
+    mode: "static"
+    # This key came from our fdo-onboarding-service (init function)
+    static_public_key: |
+      -----BEGIN PUBLIC KEY-----
+      MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAENE3An69NwI56HXVkLNxOXvPJuz9jQBmm
+      1UQHR6dowJxZVGemIWK5xx9QZSt5ZkNNgUu1l+I9PMPuplzsnQrImWuSWpRjiSvo
+      TA1KHKd7ZaGaLhgr43F3QL8LANQUb8+b
+      -----END PUBLIC KEY-----
+

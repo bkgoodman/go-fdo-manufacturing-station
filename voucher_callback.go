@@ -8,8 +8,6 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -93,17 +91,44 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 	fmt.Printf("🔍 DEBUG: VoucherSigning.Mode=%v, VoucherUpload.Enabled=%v, PersistToDB=%v\n",
 		v.config.VoucherSigning.Mode, v.config.VoucherUpload.Enabled, v.config.PersistToDB)
 
-	// 1. Voucher signing if configured
-	if v.config.VoucherSigning.Mode != "" {
-		// Get next owner key
-		// For testing, generate a test next owner key
-		// In production, this would come from configuration or callback
-		testNextOwnerKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-		if err != nil {
-			return false, fmt.Errorf("failed to generate test next owner key: %w", err)
+	// 1. Get owner signover key first (who we're signing TO)
+	var nextOwner crypto.PublicKey
+	var err error
+
+	// Owner signover logic - get the public key of the recipient we're signing over TO
+	switch v.config.OwnerSignover.Mode {
+	case "static":
+		// Static mode: use configured public key for all devices
+		if v.config.OwnerSignover.StaticPublicKey != "" {
+			nextOwner, err = parseStaticPublicKey(v.config.OwnerSignover.StaticPublicKey)
+			if err != nil {
+				return false, fmt.Errorf("failed to parse static public key: %w", err)
+			}
+			fmt.Printf("🔧 DEBUG: Using static owner key for signover\n")
+		} else {
+			fmt.Printf("🔧 DEBUG: No static public key configured - no owner signover\n")
 		}
-		nextOwner := testNextOwnerKey.Public()
-		fmt.Printf("🔧 DEBUG: Generated test next owner key for testing\n")
+
+	case "dynamic":
+		// Dynamic mode: per-device/customer public keys via callback
+		if v.config.OwnerSignover.ExternalCommand != "" {
+			ownerKey, err := v.ownerKeyService.GetOwnerKey(ctx, serial, model)
+			if err != nil {
+				return false, fmt.Errorf("failed to get dynamic owner key: %w", err)
+			}
+			// Convert to crypto.PublicKey
+			nextOwner = ownerKey.(crypto.PublicKey)
+			fmt.Printf("🔧 DEBUG: Using dynamic owner key for signover\n")
+		} else {
+			return false, fmt.Errorf("dynamic mode enabled but no external command configured")
+		}
+
+	default:
+		fmt.Printf("🔧 DEBUG: Unsupported owner signover mode: %s - no owner signover\n", v.config.OwnerSignover.Mode)
+	}
+
+	// 2. Voucher signing if configured
+	if v.config.VoucherSigning.Mode != "" {
 
 		// Get OVEExtra data if configured
 		var extraData map[int][]byte
@@ -116,6 +141,9 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 			}
 		}
 
+		// Set session state for voucher signing service to access manufacturer keys
+		v.voucherSigningService.SetSessionState(sessionState)
+
 		// Always call voucher signing - default mode is "internal" which lets go-fdo handle it
 		fmt.Printf("🔐 DEBUG: About to call SignVoucher with mode=%s, nextOwner=%v\n", v.config.VoucherSigning.Mode, nextOwner != nil)
 		signedVoucher, err := v.voucherSigningService.SignVoucher(ctx, ov, nextOwner, serial, model, extraData)
@@ -124,69 +152,34 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 		}
 		*ov = *signedVoucher // Replace with signed version
 	} else {
-		// Owner signover - get the public key of the recipient we're signing over TO
-		var ownerKey any
-		var err error
-
-		switch v.config.OwnerSignover.Mode {
-		case "static":
-			// Static mode: use configured public key for all devices
-			if v.config.OwnerSignover.StaticPublicKey != "" {
-				ownerKey, err = parseStaticPublicKey(v.config.OwnerSignover.StaticPublicKey)
-				if err != nil {
-					return false, fmt.Errorf("failed to parse static public key: %w", err)
-				}
-				fmt.Printf("🔧 DEBUG: Using static owner key for signover\n")
-			} else {
-				fmt.Printf("🔧 DEBUG: No static public key configured - skipping owner signover\n")
-			}
-
-		case "dynamic":
-			// Dynamic mode: per-device/customer public keys via callback
-			if v.config.OwnerSignover.ExternalCommand != "" {
-				ownerKey, err = v.ownerKeyService.GetOwnerKey(ctx, serial, model)
-				if err != nil {
-					return false, fmt.Errorf("failed to get dynamic owner key: %w", err)
-				}
-				fmt.Printf("🔧 DEBUG: Using dynamic owner key for signover\n")
-			} else {
-				return false, fmt.Errorf("dynamic mode enabled but no external command configured")
-			}
-
-		default:
-			return false, fmt.Errorf("unsupported owner signover mode: %s", v.config.OwnerSignover.Mode)
-		}
-
-		// If we have an owner key, extend the voucher to that owner
-		if ownerKey != nil {
-			// We need our signing key - for now, let the go-fdo library handle it
-			// In a real implementation, we'd use the appropriate signing key based on voucher signing mode
+		// No voucher signing configured, but we still might have owner signover
+		if nextOwner != nil {
+			// We have an owner key but no voucher signing - extend voucher directly
 			var extended *fdo.Voucher
 
 			// Use type assertion with the specific types that satisfy the constraint
-			switch key := ownerKey.(type) {
+			switch key := nextOwner.(type) {
 			case *rsa.PublicKey:
-				// Let go-fdo library handle the signing automatically
 				extended, err = fdo.ExtendVoucher(ov, nil, key, nil)
 				if err != nil {
-					return false, fmt.Errorf("failed to extend voucher to static owner: %w", err)
+					return false, fmt.Errorf("failed to extend voucher to owner: %w", err)
 				}
 			case *ecdsa.PublicKey:
 				extended, err = fdo.ExtendVoucher(ov, nil, key, nil)
 				if err != nil {
-					return false, fmt.Errorf("failed to extend voucher to static owner: %w", err)
+					return false, fmt.Errorf("failed to extend voucher to owner: %w", err)
 				}
 			case []*x509.Certificate:
 				extended, err = fdo.ExtendVoucher(ov, nil, key, nil)
 				if err != nil {
-					return false, fmt.Errorf("failed to extend voucher to static owner: %w", err)
+					return false, fmt.Errorf("failed to extend voucher to owner: %w", err)
 				}
 			default:
-				return false, fmt.Errorf("unsupported owner key type: %T", ownerKey)
+				return false, fmt.Errorf("unsupported owner key type: %T", nextOwner)
 			}
 
 			*ov = *extended // Replace with signed version
-			fmt.Printf("✅ Voucher extended to owner using %s mode\n", v.config.OwnerSignover.Mode)
+			fmt.Printf("✅ Voucher extended to owner using %s mode (no voucher signing)\n", v.config.OwnerSignover.Mode)
 		}
 	}
 
