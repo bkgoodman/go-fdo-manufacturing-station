@@ -2,3 +2,4 @@ cred.bin
 fdo-client
 *.log
 go-fdo
+test.db

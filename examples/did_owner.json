@@ -1,0 +1,20 @@
+{
+  "@context": ["https://www.w3.org/ns/did/v1"],
+  "id": "did:web:localhost:8080:owner",
+  "verificationMethod": [
+    {
+      "id": "#key-1",
+      "type": "JsonWebKey2020",
+      "controller": "did:web:localhost:8080:owner",
+      "publicKeyJwk": {
+        "crv": "P-256",
+        "kty": "EC",
+        "x": "4Ctyw6V3314nLqf9s_g_o9xQYlG9R3yCkKqA6j1gq3L4",
+        "y": "F8t6o9vLq3m4k2p1r8s7w5x2z9c6v3b1n4m7k0p3q6r9"
+      }
+    }
+  ],
+  "fido-device-onboarding": {
+    "voucherRecipientURL": "https://example.com/vouchers/owner"
+  }
+}

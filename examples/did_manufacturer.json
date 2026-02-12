@@ -1,0 +1,20 @@
+{
+  "@context": ["https://www.w3.org/ns/did/v1"],
+  "id": "did:web:localhost:8080:manufacturer",
+  "verificationMethod": [
+    {
+      "id": "#key-1",
+      "type": "JsonWebKey2020",
+      "controller": "did:web:localhost:8080:manufacturer",
+      "publicKeyJwk": {
+        "crv": "P-384",
+        "kty": "EC",
+        "x": "M1n2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3",
+        "y": "A4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3u4v5w6x7y8z9a0b1c2d3e4f5g6"
+      }
+    }
+  ],
+  "fido-device-onboarding": {
+    "voucherRecipientURL": "https://example.com/vouchers/manufacturer"
+  }
+}

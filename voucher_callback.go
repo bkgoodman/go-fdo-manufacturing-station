@@ -94,31 +94,43 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 	// 1. Get owner signover key first (who we're signing TO)
 	var nextOwner crypto.PublicKey
 	var err error
+	var didURL string // Store DID URL for upload
 
 	// Owner signover logic - get the public key of the recipient we're signing over TO
 	switch v.config.OwnerSignover.Mode {
 	case "static":
-		// Static mode: use configured public key for all devices
-		if v.config.OwnerSignover.StaticPublicKey != "" {
+		// Static mode: use configured public key or DID for all devices
+		if v.config.OwnerSignover.StaticDID != "" {
+			// Handle static DID
+			fmt.Printf("🔧 DEBUG: Using static DID for signover: %s\n", v.config.OwnerSignover.StaticDID)
+			// TODO: Implement DID resolution for static case
+			fmt.Printf("⚠️  Static DID resolution not yet implemented\n")
+		} else if v.config.OwnerSignover.StaticPublicKey != "" {
+			// Handle static PEM key (existing logic)
 			nextOwner, err = parseStaticPublicKey(v.config.OwnerSignover.StaticPublicKey)
 			if err != nil {
 				return false, fmt.Errorf("failed to parse static public key: %w", err)
 			}
 			fmt.Printf("🔧 DEBUG: Using static owner key for signover\n")
 		} else {
-			fmt.Printf("🔧 DEBUG: No static public key configured - no owner signover\n")
+			fmt.Printf("🔧 DEBUG: No static public key or DID configured - no owner signover\n")
 		}
 
 	case "dynamic":
 		// Dynamic mode: per-device/customer public keys via callback
 		if v.config.OwnerSignover.ExternalCommand != "" {
-			ownerKey, err := v.ownerKeyService.GetOwnerKey(ctx, serial, model)
+			ownerKeyResult, err := v.ownerKeyService.GetOwnerKey(ctx, serial, model)
 			if err != nil {
 				return false, fmt.Errorf("failed to get dynamic owner key: %w", err)
 			}
 			// Convert to crypto.PublicKey
-			nextOwner = ownerKey.(crypto.PublicKey)
+			nextOwner = ownerKeyResult.PublicKey.(crypto.PublicKey)
+			didURL = ownerKeyResult.DIDURL // Store DID URL for upload
 			fmt.Printf("🔧 DEBUG: Using dynamic owner key for signover\n")
+			// Store DID URL for upload if available
+			if ownerKeyResult.DIDURL != "" {
+				fmt.Printf("🔧 DEBUG: DID URL available for upload: %s\n", ownerKeyResult.DIDURL)
+			}
 		} else {
 			return false, fmt.Errorf("dynamic mode enabled but no external command configured")
 		}
@@ -185,7 +197,7 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 
 	// 2. Voucher upload if configured
 	if v.config.VoucherUpload.Enabled {
-		if err := v.voucherUploadService.UploadVoucher(ctx, serial, model, guidStr, ov); err != nil {
+		if err := v.voucherUploadService.UploadVoucher(ctx, serial, model, guidStr, ov, didURL); err != nil {
 			return false, fmt.Errorf("voucher upload failed: %w", err)
 		}
 	}

@@ -27,9 +27,12 @@ func NewVoucherUploadService(executor *ExternalCommandExecutor) *VoucherUploadSe
 }
 
 // UploadVoucher uploads a voucher to an external system
-func (v *VoucherUploadService) UploadVoucher(ctx context.Context, serial, model, guid string, voucher *fdo.Voucher) error {
+func (v *VoucherUploadService) UploadVoucher(ctx context.Context, serial, model, guid string, voucher *fdo.Voucher, didURL string) error {
 	fmt.Printf("🔍 DEBUG: VoucherUploadService.UploadVoucher called!\n")
 	fmt.Printf("🔍 DEBUG: serial=%s, model=%s, guid=%s\n", serial, model, guid)
+	if didURL != "" {
+		fmt.Printf("🔍 DEBUG: DID URL available: %s\n", didURL)
+	}
 
 	// Write voucher to temporary file
 	voucherFile, err := os.CreateTemp("", "voucher-*.cbor")
@@ -62,6 +65,7 @@ func (v *VoucherUploadService) UploadVoucher(ctx context.Context, serial, model,
 		"model":       model,
 		"voucherfile": voucherFile.Name(),
 		"guid":        guid,
+		"did_url":     didURL, // DID URL for voucher upload (empty if not available)
 	}
 
 	_, err = v.executor.Execute(ctx, variables)

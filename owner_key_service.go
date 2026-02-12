@@ -14,7 +14,8 @@ import (
 
 // OwnerKeyResponse is the expected JSON response from owner key service
 type OwnerKeyResponse struct {
-	OwnerKeyPEM string `json:"owner_key_pem"`
+	OwnerKeyPEM string `json:"owner_key_pem"` // Existing PEM support
+	OwnerDID    string `json:"owner_did"`     // NEW: DID URI support
 	Error       string `json:"error"`
 }
 
@@ -30,8 +31,14 @@ func NewOwnerKeyService(executor *ExternalCommandExecutor) *OwnerKeyService {
 	}
 }
 
+// OwnerKeyResult contains the result of owner key resolution
+type OwnerKeyResult struct {
+	PublicKey any    // The resolved public key
+	DIDURL    string // The DID URL (voucherRecipientURL) if available
+}
+
 // GetOwnerKey retrieves an owner key for the given device
-func (o *OwnerKeyService) GetOwnerKey(ctx context.Context, serial, model string) (any, error) {
+func (o *OwnerKeyService) GetOwnerKey(ctx context.Context, serial, model string) (*OwnerKeyResult, error) {
 	variables := map[string]string{
 		"serialno": serial,
 		"model":    model,
@@ -53,12 +60,41 @@ func (o *OwnerKeyService) GetOwnerKey(ctx context.Context, serial, model string)
 		return nil, fmt.Errorf("owner key service error: %s", response.Error)
 	}
 
+	// Handle DID response
+	if response.OwnerDID != "" {
+		return o.handleDIDResponse(ctx, response.OwnerDID)
+	}
+
+	// Handle PEM response (existing logic)
 	if response.OwnerKeyPEM == "" {
 		return nil, fmt.Errorf("no owner key returned")
 	}
 
-	// Parse PEM key
-	return parsePublicKeyFromPEM([]byte(response.OwnerKeyPEM))
+	publicKey, err := parsePublicKeyFromPEM([]byte(response.OwnerKeyPEM))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse PEM key: %w", err)
+	}
+
+	return &OwnerKeyResult{
+		PublicKey: publicKey,
+		DIDURL:    "", // PEM keys don't have DID URLs
+	}, nil
+}
+
+// handleDIDResponse handles a DID response from the callback
+func (o *OwnerKeyService) handleDIDResponse(ctx context.Context, didURI string) (*OwnerKeyResult, error) {
+	// Create a DID resolver (without caching for dynamic callbacks)
+	resolver := NewDIDResolver(nil, &DIDCache{Enabled: false})
+
+	publicKey, didURL, err := resolver.ResolveDIDKey(ctx, didURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve DID %s: %w", didURI, err)
+	}
+
+	return &OwnerKeyResult{
+		PublicKey: publicKey,
+		DIDURL:    didURL,
+	}, nil
 }
 
 // parsePublicKeyFromPEM parses a public key from PEM format

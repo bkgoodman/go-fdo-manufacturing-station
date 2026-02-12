@@ -105,11 +105,13 @@ func DefaultConfig() *Config {
 			OwnerSignover: struct {
 				Mode            string        `yaml:"mode"`              // "static" or "dynamic"
 				StaticPublicKey string        `yaml:"static_public_key"` // PEM-encoded public key for static mode
+				StaticDID       string        `yaml:"static_did"`        // DID URI for static mode
 				ExternalCommand string        `yaml:"external_command"`  // Command for dynamic mode
 				Timeout         time.Duration `yaml:"timeout"`
 			}{
 				Mode:            "static", // Default to static mode
 				StaticPublicKey: "",       // Empty means no owner signover
+				StaticDID:       "",       // Empty means no DID signover
 				ExternalCommand: "",
 				Timeout:         10 * time.Second,
 			},
@@ -121,6 +123,14 @@ func DefaultConfig() *Config {
 				Enabled:         false,
 				ExternalCommand: "",
 				Timeout:         30 * time.Second,
+			},
+			DIDCache: DIDCache{
+				Enabled:         false,              // Disabled by default
+				RefreshInterval: 1 * time.Hour,      // Check for updates every hour
+				MaxAge:          24 * time.Hour,     // Force refresh if older than 24h
+				FailureBackoff:  1 * time.Hour,      // Backoff after failed refresh
+				PurgeUnused:     7 * 24 * time.Hour, // Delete if not used for 7 days
+				PurgeOnStartup:  false,              // Don't purge on startup by default
 			},
 		},
 	}

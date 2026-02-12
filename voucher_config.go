@@ -25,6 +25,16 @@ type OVEExtraDataConfig struct {
 	Timeout         time.Duration `yaml:"timeout"`
 }
 
+// DIDCache configuration for DID resolution caching
+type DIDCache struct {
+	Enabled         bool          `yaml:"enabled"`
+	RefreshInterval time.Duration `yaml:"refresh_interval"` // Time between refresh attempts
+	MaxAge          time.Duration `yaml:"max_age"`          // Force refresh if older than this
+	FailureBackoff  time.Duration `yaml:"failure_backoff"`  // Backoff after failed refresh
+	PurgeUnused     time.Duration `yaml:"purge_unused"`     // Delete if unused for this duration
+	PurgeOnStartup  bool          `yaml:"purge_on_startup"` // Run purge cleanup on server start
+}
+
 // VoucherConfig contains configuration for voucher management
 type VoucherConfig struct {
 	PersistToDB bool `yaml:"persist_to_db"`
@@ -44,9 +54,13 @@ type VoucherConfig struct {
 	OwnerSignover struct {
 		Mode            string        `yaml:"mode"`              // "static" or "dynamic"
 		StaticPublicKey string        `yaml:"static_public_key"` // PEM-encoded public key for static mode
+		StaticDID       string        `yaml:"static_did"`        // DID URI for static mode
 		ExternalCommand string        `yaml:"external_command"`  // Command for dynamic mode
 		Timeout         time.Duration `yaml:"timeout"`
 	} `yaml:"owner_signover"`
+
+	// DID cache configuration
+	DIDCache DIDCache `yaml:"did_cache"`
 
 	VoucherUpload struct {
 		Enabled         bool          `yaml:"enabled"`

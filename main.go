@@ -41,9 +41,12 @@ var config *Config
 
 // Command line flags
 var (
-	configPath = flag.String("config", "config.yaml", "Path to configuration file")
-	initOnly   = flag.Bool("init-only", false, "Initialize database and keys only, then exit")
-	debug      = flag.Bool("debug", false, "Enable debug logging")
+	configPath             = flag.String("config", "config.yaml", "Path to configuration file")
+	initOnly               = flag.Bool("init-only", false, "Initialize database and keys only, then exit")
+	debug                  = flag.Bool("debug", false, "Enable debug logging")
+	purgeDIDCacheExpired   = flag.Bool("purge-did-cache-expired", false, "Purge expired DID cache entries then exit")
+	purgeDIDCacheAll       = flag.Bool("purge-did-cache-all", false, "Purge ALL DID cache entries then exit")
+	purgeDIDCacheOnStartup = flag.Bool("purge-did-cache-on-startup", false, "Purge expired DID cache entries on startup then continue")
 )
 
 func main() {
@@ -56,6 +59,20 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Handle DID cache purging flags
+	if *purgeDIDCacheExpired || *purgeDIDCacheAll || *purgeDIDCacheOnStartup {
+		if err := handleDIDCachePurge(); err != nil {
+			fmt.Fprintf(os.Stderr, "DID cache purge failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Exit after purge if not continuing with server
+		if *purgeDIDCacheExpired || *purgeDIDCacheAll {
+			fmt.Println("DID cache purge completed successfully")
+			os.Exit(0)
+		}
 	}
 
 	// Configure logging based on debug mode
@@ -213,6 +230,27 @@ func runManufacturingStation(ctx context.Context) error {
 	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return fmt.Errorf("error opening database: %w", err)
+	}
+
+	// Initialize DID cache if enabled
+	if config.VoucherManagement.DIDCache.Enabled {
+		fmt.Println("Initializing DID cache...")
+		didResolver := NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+		if err := didResolver.InitializeCache(context.Background()); err != nil {
+			return fmt.Errorf("error initializing DID cache: %w", err)
+		}
+
+		// Purge expired entries if configured
+		if config.VoucherManagement.DIDCache.PurgeOnStartup {
+			purged, err := didResolver.PurgeExpired(context.Background())
+			if err != nil {
+				fmt.Printf("⚠️  Failed to purge expired DID cache entries: %v\n", err)
+			} else {
+				fmt.Printf("🧹 Purged %d expired DID cache entries\n", purged)
+			}
+		}
+
+		fmt.Println("DID cache initialization completed")
 	}
 
 	// Generate keys if first-time init or database doesn't exist
@@ -610,4 +648,45 @@ func encodePublicKey(keyType protocol.KeyType, keyEncoding protocol.KeyEncoding,
 	default:
 		return nil, fmt.Errorf("unsupported key encoding: %s", keyEncoding)
 	}
+}
+
+// handleDIDCachePurge handles DID cache purging based on command line flags
+func handleDIDCachePurge() error {
+	fmt.Println("🔧 Initializing DID cache purge...")
+
+	// Create database connection
+	state, err := sqlite.Open(config.Database.Path, config.Database.Password)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer state.Close()
+
+	// Create DID resolver
+	resolver := NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+
+	// Initialize cache table
+	ctx := context.Background()
+	if err := resolver.InitializeCache(ctx); err != nil {
+		return fmt.Errorf("failed to initialize DID cache: %w", err)
+	}
+
+	// Perform the requested purge operation
+	if *purgeDIDCacheAll {
+		fmt.Println("🗑️  Purging ALL DID cache entries...")
+		count, err := resolver.PurgeAll(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to purge all DID cache entries: %w", err)
+		}
+		fmt.Printf("✅ Purged %d DID cache entries\n", count)
+	} else {
+		// Default: purge expired entries
+		fmt.Println("🗑️  Purging expired DID cache entries...")
+		count, err := resolver.PurgeExpired(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to purge expired DID cache entries: %w", err)
+		}
+		fmt.Printf("✅ Purged %d expired DID cache entries\n", count)
+	}
+
+	return nil
 }
