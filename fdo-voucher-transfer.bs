@@ -1,0 +1,949 @@
+<pre class='metadata'>
+Title: Appnote - FIDO Device Onboard: Voucher Transfer Protocol
+Shortname: appnote-voucher-transfer
+Prepare for TR: false
+Level: 1
+Status: WD
+Group: fido
+URL: https://github.com/fido-alliance/internet-of-things-specs
+Editor: Brad Goodman, Dell Technologies, brad.goodman@dell.com
+Abstract: Standard protocol for secure transfer of FDO ownership vouchers between manufacturing systems and owner systems via HTTP
+Issue Tracking: GitHub https://github.com/fido-alliance/internet-of-things-specs
+Boilerplate: omit conformance, omit feedback-header, omit abstract-header
+Markup Shorthands: css off, markdown on
+!Version: 0.1
+</pre>
+
+<pre class="link-defaults">
+spec:html; type:dfn; for:environment settings object; text:global object
+spec:infra; type:dfn; text:list
+spec:url; type:dfn; text:domain
+spec:url; type:dfn; text:valid domain;
+</pre>
+
+<pre class=biblio>
+{
+	"FDO-Specification": {
+		"authors": [
+			"FIDO Alliance"
+		],
+		"href": "https://fidoalliance.org/specs/fido-iot/",
+		"title": "FIDO Device Onboard (FDO) Specification"
+	},
+	"RFC2119": {
+		"authors": [
+			"S. Bradner"
+		],
+		"href": "https://tools.ietf.org/html/rfc2119",
+		"title": "Key words for use in RFCs to Indicate Requirement Levels"
+	},
+	"RFC7519": {
+		"authors": [
+			"M. Jones",
+			"J. Bradley",
+			"N. Sakimura"
+		],
+		"href": "https://tools.ietf.org/html/rfc7519",
+		"title": "JSON Web Token (JWT)"
+	},
+	"RFC8446": {
+		"authors": [
+			"E. Rescorla"
+		],
+		"href": "https://tools.ietf.org/html/rfc8446",
+		"title": "The Transport Layer Security (TLS) Protocol Version 1.3"
+	},
+	"RFC7231": {
+		"authors": [
+			"R. Fielding",
+			"J. Reschke"
+		],
+		"href": "https://tools.ietf.org/html/rfc7231",
+		"title": "Hypertext Transfer Protocol (HTTP/1.1): Semantics and Content"
+	},
+	"RFC7578": {
+		"authors": [
+			"L. Masinter"
+		],
+		"href": "https://tools.ietf.org/html/rfc7578",
+		"title": "Returning Values from Forms: multipart/form-data"
+	},
+	"RFC8259": {
+		"authors": [
+			"T. Bray"
+		],
+		"href": "https://tools.ietf.org/html/rfc8259",
+		"title": "The JavaScript Object Notation (JSON) Data Interchange Format"
+	},
+	"DID-Core": {
+		"authors": [
+			"W3C"
+		],
+		"href": "https://www.w3.org/TR/did-core/",
+		"title": "Decentralized Identifiers (DIDs) v1.0"
+	}
+}
+</pre>
+
+# Introduction
+
+The FIDO Device Onboard (FDO) specification [[FDO-Specification]] defines mechanisms for secure device provisioning and ownership transfer. A critical step in this process is the transfer of ownership vouchers from manufacturing systems (where devices are provisioned) to owner systems (where devices will be onboarded). Today, this transfer is handled through proprietary, implementation-specific mechanisms.
+
+This App Note defines a standard HTTP-based protocol for voucher transfer that addresses the following challenges:
+
+- **Integration Complexity**: Each manufacturer-owner pair currently requires custom integration work
+- **Security Inconsistencies**: Varying security models across implementations create gaps and confusion
+- **Scalability Issues**: No standard approach exists for high-volume or complex deployments
+- **Operational Overhead**: Lack of common monitoring, error handling, and debugging approaches
+
+The protocol defined here supports both **push** (manufacturer-initiated) and **pull** (owner-initiated) transfer models, multiple security mechanisms, pagination for large datasets, and integration with Decentralized Identifiers (DIDs) [[DID-Core]] for endpoint discovery.
+
+# Terminology
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [[RFC2119]].
+
+**Voucher Issuer**: A manufacturing system that generates FDO ownership vouchers during device provisioning. Also referred to as the manufacturer.
+
+**Voucher Recipient**: An owner system that receives and processes ownership vouchers for device onboarding. Also referred to as the owner.
+
+**Voucher Transfer**: The act of securely delivering an ownership voucher from a Voucher Issuer to a Voucher Recipient.
+
+**Push Transfer**: A transfer initiated by the Voucher Issuer, who sends the voucher to the Voucher Recipient's endpoint.
+
+**Pull Transfer**: A transfer initiated by the Voucher Recipient, who retrieves vouchers from the Voucher Issuer's endpoint.
+
+**Continuation Token**: An opaque, server-generated token used for paginating through large sets of vouchers.
+
+**Voucher Sequestering**: A process where received vouchers are held in quarantine pending additional validation before being released for use.
+
+# Use Cases and Requirements
+
+## Real-World Deployment Scenarios
+
+### Cloud Service Push
+
+A Voucher Issuer manufactures devices and immediately pushes vouchers to a cloud-based Voucher Recipient service. This scenario requires real-time delivery, high availability, and global accessibility. The Voucher Recipient's endpoint is always reachable over the public internet.
+
+### On-Premises Pull
+
+A Voucher Recipient operates in an isolated network (air-gapped, local data center) without inbound internet access. The Voucher Recipient periodically initiates outbound connections to retrieve vouchers from the Voucher Issuer. This scenario requires secure outbound connections, batch processing, and offline operation support.
+
+### Batch Transfer
+
+Manufacturing sites may go offline due to network outages or maintenance. Vouchers generated during offline periods MUST be queued and batch-uploaded when connectivity is restored. Similarly, Voucher Recipients MAY need to retrieve large volumes of vouchers efficiently during maintenance windows.
+
+### Reconciliation and Recovery
+
+System failures, data corruption, or disaster recovery scenarios require voucher re-synchronization. A Voucher Recipient MUST be able to request "all vouchers since a given checkpoint" to restore state after a failure. Duplicate detection ensures that re-transferred vouchers do not cause errors.
+
+### Pagination
+
+Pull transfers involving large datasets MUST support pagination. Push transfers MAY support pagination for bulk uploads or rate-limited environments. Pagination tokens SHOULD be opaque to the client and managed entirely by the server.
+
+## Security Requirements
+
+### Authentication is Mandatory
+
+Voucher transfer endpoints MUST NOT be exposed to the internet without authentication and authorization. Unauthenticated endpoints create risk of unauthorized voucher submission, denial-of-service attacks, data harvesting, and manufacturer impersonation.
+
+### Voucher-Only Security is Insufficient
+
+Relying solely on voucher signature validation to authenticate requests places a heavy computational burden on the Voucher Recipient. Attackers can flood systems with invalid vouchers, forcing expensive cryptographic operations (parsing, signature verification) before the request can be rejected. This makes voucher-only security a denial-of-service vector.
+
+### Edge and WAF Compatibility
+
+Security credentials SHOULD be usable by Web Application Firewalls (WAFs) and edge security systems. This enables early rejection of invalid requests before they reach the application layer, providing DDoS protection and reducing load on application servers. Token-based credentials (e.g., JWT) are well-suited for edge validation; certificate-based credentials (e.g., mTLS) typically require TLS termination at the application.
+
+## Security Approaches
+
+This protocol defines two categories of security mechanisms that MAY be used independently or in combination.
+
+### Explicit Permission Models
+
+Explicit permissions are granted out-of-band before voucher transfer begins:
+
+- **Token-Based Authorization**: JWT tokens [[RFC7519]] with scopes, quotas, time limits, and device restrictions
+- **Certificate-Based Authentication**: Mutual TLS [[RFC8446]] with enrolled manufacturer certificates or CAs
+- **API Keys**: Simple bearer tokens for basic scenarios
+- **Purchase-Tied Permissions**: Tokens generated during the device purchase process, tied to specific orders or customers
+
+### Implicit Trust Models
+
+Implicit trust is derived from properties of the voucher itself or the issuer's identity:
+
+- **Voucher Signature Validation**: Cryptographic verification of manufacturer signatures within the voucher
+- **Shared Key Systems**: Using the same keys that sign vouchers for transport-level authentication
+- **DID-Based Trust**: Resolving manufacturer identities through DID documents [[DID-Core]]
+
+### Defense-in-Depth
+
+Deployments SHOULD use a layered approach combining multiple mechanisms:
+
+**Layer 1: Transport Security** (REQUIRED)
+- HTTPS with TLS 1.2+ [[RFC8446]]
+- Certificate validation
+- HSTS headers
+
+**Layer 2: Authentication** (REQUIRED, choose one or more)
+- Token-based authorization
+- Mutual TLS with manufacturer certificates
+
+**Layer 3: Voucher Integrity** (RECOMMENDED)
+- Voucher signature validation against trusted manufacturer keys
+
+**Layer 4: Business Logic** (OPTIONAL)
+- Order validation, device registration checks, customer verification
+
+# Transfer Models
+
+## Push Model (Issuer-Initiated)
+
+In the push model, the Voucher Issuer sends vouchers to the Voucher Recipient as soon as they are generated.
+
+### Flow
+
+1. Voucher Issuer generates voucher during device provisioning
+2. Voucher Issuer resolves Voucher Recipient endpoint (configured or via DID)
+3. Voucher Issuer authenticates to Voucher Recipient endpoint
+4. Voucher Issuer sends voucher via HTTP POST
+5. Voucher Recipient validates authentication, then accepts or rejects the voucher
+6. Voucher Recipient returns status to Voucher Issuer
+
+### Characteristics
+
+- **Latency**: Minimal — vouchers available immediately after generation
+- **Availability**: Voucher Recipient endpoint MUST be reachable
+- **DDoS Exposure**: Voucher Recipient is exposed to unsolicited requests
+- **Complexity**: Simple retry logic on the issuer side
+
+## Pull Model (Recipient-Initiated)
+
+In the pull model, the Voucher Recipient retrieves vouchers from the Voucher Issuer when ready.
+
+### Flow
+
+1. Voucher Issuer generates and stores vouchers
+2. Voucher Recipient authenticates to Voucher Issuer endpoint
+3. Voucher Recipient requests vouchers (optionally filtered by time, status, etc.)
+4. Voucher Issuer returns voucher metadata with pagination
+5. Voucher Recipient downloads individual voucher files
+6. Voucher Recipient acknowledges receipt (optional)
+
+### Characteristics
+
+- **Latency**: Depends on polling interval
+- **Availability**: Voucher Issuer endpoint MUST be reachable; Voucher Recipient controls timing
+- **DDoS Exposure**: Reduced — Voucher Recipient initiates all connections
+- **Complexity**: Requires pagination, polling, or subscription infrastructure
+
+## Hybrid Approaches
+
+Deployments MAY combine push and pull models:
+
+- **Push with Pull Fallback**: Primary push delivery with pull capability for missed or failed vouchers
+- **Pull with Notifications**: Pull model with webhook or other notification when new vouchers are available
+- **Conditional Transfer**: Push for high-priority devices, pull for bulk processing
+
+# Voucher File Format
+
+## File Extension
+
+Voucher files SHALL use the `.fdoov` file extension.
+
+## MIME Type
+
+The MIME type for FDO voucher files SHALL be `application/x-fdo-voucher`.
+
+Implementations MAY also accept `application/octet-stream` as a fallback.
+
+## File Contents
+
+A `.fdoov` file is a binary-encoded FDO ownership voucher as defined in [[FDO-Specification]]. The file contains:
+
+1. Device information (serial number, model, GUID)
+2. Manufacturer signature
+3. Owner public key
+4. Device attestation data
+
+## Size Constraints
+
+Voucher Recipient implementations SHOULD accept voucher files up to 10 MB. Typical voucher files are expected to be well under 1 MB.
+
+Voucher files MAY be compressed using gzip. When compressed, the `Content-Encoding: gzip` header MUST be present.
+
+# Push API Specification
+
+## Submit Voucher
+
+### POST /api/v1/vouchers
+
+Submits a single voucher to the Voucher Recipient.
+
+#### Request
+
+**Content-Type**: `multipart/form-data` [[RFC7578]]
+
+**Form Parameters**:
+
+- `voucher` (file, REQUIRED): The `.fdoov` voucher file
+- `serial` (string, OPTIONAL): Device serial number
+- `model` (string, OPTIONAL): Device model identifier
+- `manufacturer` (string, OPTIONAL): Voucher Issuer identifier
+- `timestamp` (string, OPTIONAL): Voucher generation timestamp (ISO 8601)
+
+**Headers**:
+
+- `Content-Type`: `multipart/form-data; boundary=...` (REQUIRED)
+- `Authorization`: Bearer token or API key (REQUIRED unless mTLS is used)
+- `X-FDO-Version`: Protocol version, e.g., `1.0` (RECOMMENDED)
+- `X-FDO-Client-ID`: Client identifier for tracking (OPTIONAL)
+
+#### Response
+
+**Success Codes**:
+
+- `200 OK`: Voucher accepted and processed synchronously
+- `202 Accepted`: Voucher accepted for asynchronous processing
+
+**Error Codes**:
+
+- `400 Bad Request`: Invalid voucher format or missing required data
+- `401 Unauthorized`: Authentication required or failed
+- `403 Forbidden`: Authenticated but not authorized to submit vouchers
+- `409 Conflict`: Duplicate voucher for same device
+- `413 Payload Too Large`: Voucher file exceeds size limits
+- `429 Too Many Requests`: Rate limit exceeded; `Retry-After` header SHOULD be present
+- `500 Internal Server Error`: Server processing error
+- `503 Service Unavailable`: Temporarily unable to process; `Retry-After` header SHOULD be present
+
+**Response Body** (JSON [[RFC8259]]):
+
+```json
+{
+  "status": "accepted",
+  "voucher_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Voucher accepted for processing",
+  "timestamp": "2024-01-15T12:00:00Z"
+}
+```
+
+The `status` field SHALL be one of: `accepted`, `processed`, `pending`, `error`.
+
+### PUT /api/v1/vouchers/{serial}
+
+Submits a voucher for a specific device identified by serial number.
+
+#### Request
+
+**Content-Type**: `application/x-fdo-voucher` or `application/octet-stream`
+
+The request body SHALL be the raw `.fdoov` file content.
+
+**Headers**:
+
+- `Content-Type`: `application/x-fdo-voucher` (REQUIRED)
+- `Authorization`: Bearer token or API key (REQUIRED unless mTLS is used)
+- `X-FDO-Version`: Protocol version (RECOMMENDED)
+- `X-FDO-Model`: Device model identifier (OPTIONAL)
+- `X-FDO-Manufacturer`: Voucher Issuer identifier (OPTIONAL)
+- `X-FDO-Timestamp`: Voucher generation timestamp (OPTIONAL)
+
+#### Response
+
+Same response format as POST endpoint.
+
+## Query Voucher Status
+
+### GET /api/v1/vouchers/{serial}/status
+
+Returns the processing status of a previously submitted voucher.
+
+#### Request
+
+**Headers**:
+
+- `Authorization`: Bearer token or API key (REQUIRED unless mTLS is used)
+
+#### Response
+
+```json
+{
+  "voucher_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "completed",
+  "submitted_at": "2024-01-15T12:00:00Z",
+  "processed_at": "2024-01-15T12:01:30Z",
+  "error_message": null,
+  "retry_count": 0
+}
+```
+
+The `status` field SHALL be one of: `pending`, `processing`, `completed`, `failed`.
+
+# Pull API Specification
+
+## List Vouchers
+
+### GET /api/v1/vouchers
+
+Returns voucher metadata for the authenticated client. Results are paginated.
+
+#### Request
+
+**Query Parameters**:
+
+- `since` (timestamp, OPTIONAL): Return vouchers created after this time (ISO 8601)
+- `until` (timestamp, OPTIONAL): Return vouchers created before this time
+- `status` (string, OPTIONAL): Filter by status (`pending`, `downloaded`, `all`). Default: `pending`
+- `limit` (integer, OPTIONAL): Maximum vouchers to return. Default: 100. Maximum: 1000
+- `continuation` (string, OPTIONAL): Opaque continuation token from a previous response
+
+**Headers**:
+
+- `Authorization`: Bearer token or API key (REQUIRED unless mTLS is used)
+
+#### Response
+
+```json
+{
+  "vouchers": [
+    {
+      "voucher_id": "550e8400-e29b-41d4-a716-446655440000",
+      "serial": "ABC123",
+      "model": "model-a",
+      "manufacturer_id": "mfg-abc123",
+      "status": "pending",
+      "created_at": "2024-01-15T12:00:00Z",
+      "size_bytes": 1024,
+      "checksum": "sha256:abcdef1234567890..."
+    }
+  ],
+  "continuation": "opaque-token-abc123",
+  "has_more": true,
+  "total_count": 1500
+}
+```
+
+The `continuation` field SHALL be present when `has_more` is `true`. Clients SHALL pass this value unchanged in the `continuation` query parameter of the next request to retrieve the next page.
+
+Continuation tokens are opaque to the client. Servers MAY encode position, filters, expiry, or other state within the token. Continuation tokens SHOULD expire after a reasonable period (e.g., 1 hour).
+
+## Download Voucher
+
+### GET /api/v1/vouchers/{voucher_id}/download
+
+Downloads the actual voucher file.
+
+#### Request
+
+**Headers**:
+
+- `Authorization`: Bearer token or API key (REQUIRED unless mTLS is used)
+
+#### Response
+
+**Headers**:
+
+- `Content-Type`: `application/x-fdo-voucher`
+- `Content-Disposition`: `attachment; filename="{serial}.fdoov"`
+- `Content-Length`: File size in bytes
+- `X-FDO-Checksum`: `sha256:{hash}`
+
+**Body**: Raw `.fdoov` file content.
+
+## Subscription and Notification
+
+### Long-Polling
+
+#### GET /api/v1/vouchers/subscribe
+
+Returns immediately if vouchers are available; otherwise blocks up to the specified timeout.
+
+**Query Parameters**:
+
+- `timeout` (integer, OPTIONAL): Maximum wait time in seconds. Default: 30. Maximum: 120
+- `since` (timestamp, OPTIONAL): Only return vouchers created after this time
+
+**Response**: Same format as the List Vouchers endpoint.
+
+### Server-Sent Events
+
+#### GET /api/v1/vouchers/stream
+
+Returns a Server-Sent Events stream of voucher availability notifications.
+
+**Response**:
+
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+
+retry: 5000
+event: voucher_available
+data: {"voucher_id": "uuid-1", "serial": "ABC123", "created_at": "2024-01-15T12:00:00Z"}
+
+event: voucher_available
+data: {"voucher_id": "uuid-2", "serial": "DEF456", "created_at": "2024-01-15T12:01:00Z"}
+```
+
+Clients receiving these events SHOULD use the Download Voucher endpoint to retrieve the actual voucher file.
+
+# Security Framework
+
+## Threat Model
+
+The following threats apply to voucher transfer endpoints:
+
+- **Unauthorized Voucher Submission**: Malicious actors sending fraudulent vouchers to a Voucher Recipient
+- **Voucher Injection**: Attackers submitting vouchers for devices they do not own
+- **Denial of Service**: Overwhelming Voucher Recipient systems with invalid vouchers or requests
+- **Data Harvesting**: Using voucher endpoints to discover device information
+- **Manufacturer Impersonation**: Fake Voucher Issuers submitting counterfeit vouchers
+
+## Security Model 1: Token-Based Authorization
+
+### Overview
+
+The Voucher Recipient issues scoped tokens to authorized Voucher Issuers. Tokens are validated at the HTTP layer before any voucher processing occurs.
+
+### DDoS Advantages
+
+- **Fast Rejection**: Token validation can occur at edge/WAF before reaching the application
+- **Third-Party WAF Support**: Standard JWT tokens can be validated by CDN and WAF providers
+- **Rate Limiting**: Token-based rate limiting per Voucher Issuer
+- **Resource Efficiency**: Minimal processing required for invalid requests
+
+### Token Format
+
+Tokens SHOULD use the JWT format [[RFC7519]]. The following claims are defined:
+
+```json
+{
+  "iss": "https://recipient.example.com",
+  "sub": "manufacturer-123",
+  "aud": "https://recipient.example.com/api/v1/vouchers",
+  "exp": 1640995200,
+  "iat": 1640908800,
+  "scope": "voucher:submit",
+  "limits": {
+    "max_vouchers": 100,
+    "allowed_models": ["model-a", "model-b"],
+    "allowed_serials": ["prefix-*"]
+  },
+  "manufacturer_id": "mfg-abc123"
+}
+```
+
+### Token Types
+
+- **Time-Limited Tokens**: Valid for a specified duration (e.g., 24 hours, 30 days)
+- **Quota-Limited Tokens**: Maximum number of vouchers allowed
+- **One-Time Use Tokens**: Single voucher submission, auto-expire after use
+- **Device-Specific Tokens**: Valid only for specific device serial numbers or models
+- **Purchase-Tied Tokens**: Generated during the purchase process, tied to a specific order
+
+### Validation
+
+1. Client includes `Authorization: Bearer <token>` header
+2. Server (or WAF) validates JWT signature and claims
+3. Server enforces token limits and scope
+4. Token quota is decremented (for quota-limited tokens)
+
+## Security Model 2: Manufacturer Key Enrollment (mTLS)
+
+### Overview
+
+The Voucher Recipient enrolls manufacturer certificates for mutual TLS authentication. All voucher submissions require a successful mTLS handshake.
+
+### DDoS Considerations
+
+- **Medium Resource Usage**: TLS handshake requires CPU but less than voucher parsing
+- **Connection Filtering**: Invalid certificates are rejected at the TLS layer
+- **WAF Limitations**: mTLS validation typically requires TLS termination at the application, limiting edge filtering
+
+### Enrollment Process
+
+1. Voucher Issuer provides public key or CA certificate to Voucher Recipient
+2. Voucher Recipient adds certificate to trusted manufacturer store
+3. Voucher Issuer configures client with corresponding private key
+4. All voucher submissions require mTLS handshake
+
+### JWT vs mTLS Comparison
+
+<table>
+  <thead>
+    <tr>
+      <th>Aspect</th>
+      <th>JWT Tokens</th>
+      <th>mTLS Certificates</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Validation Speed</td>
+      <td>Very fast (signature check)</td>
+      <td>Medium (TLS handshake)</td>
+    </tr>
+    <tr>
+      <td>WAF Support</td>
+      <td>Excellent (edge validation)</td>
+      <td>Limited (requires TLS termination)</td>
+    </tr>
+    <tr>
+      <td>Revocation</td>
+      <td>Immediate (token blacklist)</td>
+      <td>Delayed (CRL/OCSP)</td>
+    </tr>
+    <tr>
+      <td>Scope Flexibility</td>
+      <td>High (claims-based)</td>
+      <td>Low (certificate-based)</td>
+    </tr>
+    <tr>
+      <td>Key Rotation</td>
+      <td>Easy (new tokens)</td>
+      <td>Complex (certificate reissuance)</td>
+    </tr>
+    <tr>
+      <td>Third-Party Integration</td>
+      <td>Excellent</td>
+      <td>Poor</td>
+    </tr>
+  </tbody>
+</table>
+
+## Security Model 3: Voucher Signature Validation
+
+### Overview
+
+The Voucher Recipient validates voucher signatures against trusted manufacturer keys. This model provides cryptographic proof of voucher authenticity but requires full voucher parsing.
+
+### DDoS Implications
+
+- **High Resource Usage**: Requires voucher parsing and cryptographic verification
+- **Processing Bottleneck**: Entire voucher must be parsed before rejection
+- **CPU Intensive**: Signature verification is computationally expensive
+- **Late Rejection**: Invalid vouchers are only rejected after full processing
+
+This model SHOULD NOT be used as the sole authentication mechanism. It SHOULD be combined with a lighter-weight authentication layer (Model 1 or Model 2) to provide early rejection of unauthorized requests.
+
+### Validation Process
+
+1. Extract manufacturer signature from voucher
+2. Look up manufacturer public key from trusted store or DID document
+3. Verify cryptographic signature of voucher data
+4. Reject vouchers with invalid or untrusted signatures
+
+## Security Model 4: Business Logic Validation
+
+### Overview
+
+Application-level validation based on business rules and order data. This model provides the deepest validation but has the highest resource cost.
+
+### DDoS Impact
+
+- **Very High Resource Usage**: Database lookups, external API calls, complex validation
+- **External Dependencies**: Relies on CRM, order systems, device registries
+- **Cascading Failures**: External service issues affect voucher processing
+
+### Validation Types
+
+- **Order Number Validation**: Voucher must reference a valid purchase order
+- **Device Registration**: Device must be pre-registered in the Voucher Recipient system
+- **Customer Validation**: Voucher must be for a registered customer
+- **Quantity Limits**: Enforce order quantities and limits
+
+## Security Matrix
+
+<table>
+  <thead>
+    <tr>
+      <th>Security Level</th>
+      <th>Authentication</th>
+      <th>Voucher Signature</th>
+      <th>Business Logic</th>
+      <th>DDoS Resistance</th>
+      <th>Resource Usage</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Basic</td>
+      <td>None</td>
+      <td>Required</td>
+      <td>Optional</td>
+      <td>Low</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td>Token-Only</td>
+      <td>JWT Token</td>
+      <td>Optional</td>
+      <td>Optional</td>
+      <td>High</td>
+      <td>Low</td>
+    </tr>
+    <tr>
+      <td>Standard</td>
+      <td>Token or mTLS</td>
+      <td>Required</td>
+      <td>Recommended</td>
+      <td>Medium</td>
+      <td>Medium</td>
+    </tr>
+    <tr>
+      <td>High</td>
+      <td>Token + mTLS</td>
+      <td>Required</td>
+      <td>Required</td>
+      <td>High</td>
+      <td>Medium</td>
+    </tr>
+    <tr>
+      <td>Maximum</td>
+      <td>Token + mTLS</td>
+      <td>Required + Rotation</td>
+      <td>Required + Audit</td>
+      <td>Very High</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td>Voucher-Based</td>
+      <td>None</td>
+      <td>Required + Deep</td>
+      <td>Required + Sequestering</td>
+      <td>Low</td>
+      <td>Very High</td>
+    </tr>
+  </tbody>
+</table>
+
+## Purchase Process Integration
+
+### Token Generation During Purchase
+
+1. Customer purchases devices through ordering system
+2. Ordering system generates manufacturer-specific JWT tokens
+3. Tokens include purchase order details, device counts, and expiration
+4. Tokens are provided to the Voucher Issuer along with DID information
+5. Voucher Issuer uses tokens when submitting vouchers
+
+### Purchase-Tied Token Format
+
+```json
+{
+  "iss": "https://ordering.example.com",
+  "sub": "manufacturer-123",
+  "aud": "https://owner.example.com/api/v1/vouchers",
+  "exp": 1640995200,
+  "iat": 1640908800,
+  "purchase_order": "PO-12345",
+  "customer_id": "cust-abc123",
+  "device_counts": {
+    "model-a": 100,
+    "model-b": 50
+  },
+  "manufacturer_id": "mfg-abc123"
+}
+```
+
+# Voucher Sequestering
+
+## Overview
+
+Voucher sequestering holds submitted vouchers in quarantine until additional validation or approval is completed. This provides an additional layer of protection against unauthorized or suspicious voucher submissions.
+
+## Process
+
+1. **Quarantine Reception**: Voucher is accepted but held in quarantine status
+2. **Additional Validation**: Business logic, order verification, or manual review is performed
+3. **Approval**: Automatic or manual approval based on risk assessment rules
+4. **Release or Reject**: Approved vouchers are released for use; rejected vouchers are deleted or archived
+
+## Risk-Based Sequestering
+
+<table>
+  <thead>
+    <tr>
+      <th>Risk Level</th>
+      <th>Auto-Approval</th>
+      <th>Manual Review</th>
+      <th>Quarantine Duration</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Low</td>
+      <td>Yes</td>
+      <td>No</td>
+      <td>1 hour</td>
+    </tr>
+    <tr>
+      <td>Medium</td>
+      <td>Conditional</td>
+      <td>Yes</td>
+      <td>4 hours</td>
+    </tr>
+    <tr>
+      <td>High</td>
+      <td>No</td>
+      <td>Required</td>
+      <td>24 hours</td>
+    </tr>
+    <tr>
+      <td>Critical</td>
+      <td>No</td>
+      <td>Executive</td>
+      <td>72 hours</td>
+    </tr>
+  </tbody>
+</table>
+
+Implementations SHOULD define risk assessment rules based on:
+
+- Whether the Voucher Issuer is a known, trusted manufacturer
+- Whether the voucher matches a verified purchase order
+- Whether the device count is within expected ranges
+- Whether the submission pattern is anomalous
+
+# DID Integration
+
+## DID-Enhanced Transfer
+
+When using DID-based recipient identification [[DID-Core]], the transfer process includes:
+
+1. Voucher Issuer resolves Voucher Recipient's DID URI
+2. Voucher Issuer extracts `voucherRecipientURL` from DID document
+3. Voucher Issuer POSTs voucher directly to extracted URL
+4. If DID URL is unavailable, Voucher Issuer falls back to configured endpoint
+
+## DID Document Extension
+
+DID documents for Voucher Recipients MAY include an `fido-device-onboarding` extension:
+
+```json
+{
+  "@context": ["https://www.w3.org/ns/did/v1"],
+  "verificationMethod": [...],
+  "fido-device-onboarding": {
+    "voucherRecipientURL": "https://owner.example.com/api/v1/vouchers",
+    "supportedFormats": ["application/x-fdo-voucher"],
+    "authentication": ["bearer", "mtls"],
+    "securityRequirements": {
+      "required": ["signature", "token"],
+      "optional": ["business_validation"],
+      "token_endpoint": "https://owner.example.com/api/v1/tokens",
+      "trusted_manufacturers": ["did:web:mfg1.com", "did:web:mfg2.com"]
+    }
+  }
+}
+```
+
+The `securityRequirements` field allows Voucher Recipients to advertise what authentication mechanisms they REQUIRE from Voucher Issuers. Voucher Issuers MUST satisfy all `required` security mechanisms before submitting vouchers.
+
+# Error Handling and Retry Logic
+
+## Retry Strategy
+
+Voucher Issuers MUST implement retry logic for transient failures:
+
+1. **Exponential Backoff**: Base delay of 1 second, doubling on each retry (1s, 2s, 4s, 8s, 16s, 32s)
+2. **Maximum Attempts**: At least 5 retries (configurable)
+3. **Jitter**: Random delay of ±25% to prevent thundering herd
+4. **Circuit Breaker**: Temporarily stop sending to endpoints that are consistently failing
+5. **Dead Letter Queue**: Failed transfers SHOULD be stored for manual review
+
+## Error Categories
+
+### Transient Errors (Retry)
+
+- Network timeouts
+- HTTP 5xx server errors
+- HTTP 429 Too Many Requests (honor `Retry-After` header)
+- HTTP 503 Service Unavailable (honor `Retry-After` header)
+
+### Permanent Errors (Do Not Retry)
+
+- HTTP 400 Bad Request (invalid voucher format)
+- HTTP 401 Unauthorized (authentication failure)
+- HTTP 403 Forbidden (authorization failure)
+- HTTP 409 Conflict (duplicate voucher)
+- HTTP 413 Payload Too Large
+
+### Configuration Errors (Manual Intervention)
+
+- Invalid recipient URLs
+- Missing or expired authentication credentials
+- DID resolution failures
+- Certificate validation errors
+
+# Security Considerations
+
+## Transport Security
+
+All voucher transfer endpoints MUST use HTTPS with TLS 1.2 or later [[RFC8446]]. Certificate validation MUST be performed. HTTP Strict Transport Security (HSTS) headers SHOULD be set.
+
+## Error Response Security
+
+Error responses MUST NOT reveal internal system details, stack traces, or other information that could aid an attacker. Error responses SHOULD include a request identifier for correlation with server-side logs.
+
+```json
+{
+  "error": "authentication_failed",
+  "message": "Invalid or expired token",
+  "error_code": "AUTH_001",
+  "timestamp": "2024-01-15T12:00:00Z",
+  "request_id": "req-abc123"
+}
+```
+
+## Rate Limiting
+
+Voucher Recipient implementations SHOULD implement rate limiting:
+
+- Per-manufacturer rate limits based on token or certificate identity
+- Per-IP rate limits as a fallback
+- Burst limits to handle legitimate spikes
+- `429 Too Many Requests` response with `Retry-After` header
+
+## Security Monitoring
+
+Implementations SHOULD monitor for:
+
+- Authentication failures by manufacturer
+- Invalid signature attempts
+- Token usage anomalies
+- Unusual geographic patterns
+- Rate limit violations
+- Certificate expiration warnings
+
+# Implementation Guidelines
+
+## Versioning
+
+The API path includes a version prefix (`/api/v1/`). Future versions SHALL use incrementing version numbers (`/api/v2/`, etc.). Servers SHOULD support at least one previous version during transition periods.
+
+## Content Negotiation
+
+Servers MUST return `application/json` [[RFC8259]] for all non-file responses. Servers MUST return `application/x-fdo-voucher` for voucher file downloads.
+
+## Idempotency
+
+The PUT endpoint (`/api/v1/vouchers/{serial}`) SHALL be idempotent. Submitting the same voucher for the same serial number multiple times MUST NOT create duplicate entries. The POST endpoint MAY return `409 Conflict` for duplicate submissions.
+
+## Pagination Best Practices
+
+- Continuation tokens SHOULD be opaque to clients
+- Continuation tokens SHOULD expire after a reasonable period
+- Servers SHOULD support `since` parameter for checkpoint-based retrieval
+- Servers SHOULD return `total_count` when feasible
+
+# Future Enhancements
+
+- **Batch Transfer**: Submit multiple vouchers in a single request
+- **WebSocket Support**: Real-time transfer status updates
+- **Event-Driven Architecture**: Message queue integration for high-volume deployments
+- **Standardized MIME Type Registration**: Formal IANA registration of `application/x-fdo-voucher`
+
+# Conclusion
+
+The FDO Voucher Transfer Protocol provides a standardized, secure method for transferring ownership vouchers between manufacturing systems and owner systems. By defining both push and pull models, multiple security mechanisms with defense-in-depth layering, pagination for large datasets, and DID integration for endpoint discovery, this protocol enables interoperable voucher transfer across diverse deployment scenarios while maintaining the security guarantees of the FDO specification.
