@@ -5,15 +5,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"time"
 
@@ -214,90 +210,4 @@ func (s *VoucherSigningService) signVoucherHSM(ctx context.Context, voucher *fdo
 
 	fmt.Printf("✅ Voucher extended successfully using external HSM\n")
 	return extendedVoucher, nil
-}
-
-// encodePublicKeyToPEM encodes a public key to PEM format
-func encodePublicKeyToPEM(pubKey crypto.PublicKey) (string, error) {
-	switch key := pubKey.(type) {
-	case *rsa.PublicKey:
-		return encodeRSAPublicKeyToPEM(key)
-	case *ecdsa.PublicKey:
-		return encodeECDSAPublicKeyToPEM(key)
-	default:
-		return "", fmt.Errorf("unsupported public key type: %T", pubKey)
-	}
-}
-
-// encodeRSAPublicKeyToPEM encodes RSA public key to PEM
-func encodeRSAPublicKeyToPEM(key *rsa.PublicKey) (string, error) {
-	// For RSA, we'll use PKIX format
-	keyBytes, err := x509.MarshalPKIXPublicKey(key)
-	if err != nil {
-		return "", err
-	}
-
-	pemKey := &pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: keyBytes,
-	}
-
-	var pemData bytes.Buffer
-	if err := pem.Encode(&pemData, pemKey); err != nil {
-		return "", err
-	}
-
-	return pemData.String(), nil
-}
-
-// encodeECDSAPublicKeyToPEM encodes ECDSA public key to PEM
-func encodeECDSAPublicKeyToPEM(key *ecdsa.PublicKey) (string, error) {
-	// For ECDSA, we'll use PKIX format
-	keyBytes, err := x509.MarshalPKIXPublicKey(key)
-	if err != nil {
-		return "", err
-	}
-
-	pemKey := &pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: keyBytes,
-	}
-
-	var pemData bytes.Buffer
-	if err := pem.Encode(&pemData, pemKey); err != nil {
-		return "", err
-	}
-
-	return pemData.String(), nil
-}
-
-// generateOwnerKey generates an owner signing key based on key type
-func generateOwnerKey(keyType string) (crypto.Signer, error) {
-	switch keyType {
-	case "rsa2048":
-		return rsa.GenerateKey(rand.Reader, 2048)
-	case "rsa3072":
-		return rsa.GenerateKey(rand.Reader, 3072)
-	case "ec256":
-		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	case "ec384":
-		return ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	default:
-		return nil, fmt.Errorf("unsupported owner key type: %s", keyType)
-	}
-}
-
-// parseKeyType converts string key type to protocol.KeyType
-func parseKeyType(keyType string) (protocol.KeyType, error) {
-	switch keyType {
-	case "rsa2048":
-		return protocol.Rsa2048RestrKeyType, nil
-	case "rsa3072":
-		return protocol.RsaPkcsKeyType, nil
-	case "ec256":
-		return protocol.Secp256r1KeyType, nil
-	case "ec384":
-		return protocol.Secp384r1KeyType, nil
-	default:
-		return 0, fmt.Errorf("unsupported key type: %s", keyType)
-	}
 }

@@ -97,16 +97,8 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 	fmt.Printf("🔍 DEBUG: VoucherSigning.Mode=%v, VoucherUpload.Enabled=%v, PersistToDB=%v\n",
 		v.config.VoucherSigning.Mode, v.config.VoucherUpload.Enabled, v.config.PersistToDB)
 
-	// Persist voucher to GUID-based file store so transmissions can reference it later
+	// Path to the voucher artifact saved for push transmission
 	var voucherFilePath string
-	if v.voucherFileStore != nil {
-		if path, err := v.voucherFileStore.SaveVoucher(ov); err != nil {
-			fmt.Printf("⚠️  Failed to store voucher file for GUID %s: %v\n", guidStr, err)
-		} else {
-			voucherFilePath = path
-			fmt.Printf("🗂️  Voucher stored at %s\n", path)
-		}
-	}
 
 	// 1. Get owner signover key first (who we're signing TO)
 	var nextOwner crypto.PublicKey
@@ -209,6 +201,16 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 
 			*ov = *extended // Replace with signed version
 			fmt.Printf("✅ Voucher extended to owner using %s mode (no voucher signing)\n", v.config.OwnerSignover.Mode)
+		}
+	}
+
+	// Persist voucher to GUID-based file store now that signing is complete
+	if v.voucherFileStore != nil {
+		if path, err := v.voucherFileStore.SaveVoucher(ov); err != nil {
+			fmt.Printf("⚠️  Failed to store voucher file for GUID %s: %v\n", guidStr, err)
+		} else {
+			voucherFilePath = path
+			fmt.Printf("🗂️  Voucher stored at %s\n", path)
 		}
 	}
 

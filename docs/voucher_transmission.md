@@ -97,3 +97,12 @@ Use the CLI to inspect or purge records instead of modifying the table manually.
 5. Purge rows when they are no longer needed (after successful delivery or manual export).
 
 Keeping vouchers in the database plus filesystem provides a fully traceable handoff history and makes customer support significantly easier.
+
+## Automated Tests
+
+Two integration tests now exercise the voucher egress paths end-to-end:
+
+1. `tests/test_disk_save.sh` – Verifies the callback pipeline can sign, save, and validate vouchers on disk using the mock HSM signer.
+2. `tests/test_voucher_push.sh` – Spins up the new `voucher-push-receiver` helper (listens on `localhost:9090/push`), runs the manufacturing station with `tests/config_push_test.cfg`, and confirms the pushed multipart upload matches the `.fdoov` file saved locally while logging metadata for later inspection.
+
+Both scripts are wired into `tests/run_all_tests.sh`, so CI must keep them green before considering voucher push work “done.”

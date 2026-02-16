@@ -42,7 +42,7 @@ run_test() {
     fi
 }
 
-# Run all 14 tests
+# Run all 15 tests
 run_test "Basic Tests" "tests/test_basic.sh"
 run_test "Echo Tests" "tests/test_echo.sh"
 run_test "Fixed Owner" "tests/test_fixed_owner.sh"
@@ -57,6 +57,7 @@ run_test "Payload" "tests/test_payload.sh"
 run_test "Setup" "tests/test_setup.sh"
 run_test "Simple" "tests/test_simple.sh"
 run_test "Voucher Management" "tests/test_voucher_management.sh"
+run_test "Voucher Push" "tests/test_voucher_push.sh"
 #run_test "Examples" "tests/test_examples.sh"
 
 echo ""

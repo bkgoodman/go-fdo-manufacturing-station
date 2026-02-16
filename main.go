@@ -308,9 +308,6 @@ type noDebugHandler struct {
 	handler slog.Handler
 }
 
-// disabledHandler is a slog.Handler that completely disables all logging
-type disabledHandler struct{}
-
 func (h *noDebugHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	// Block DEBUG level completely
 	if level == slog.LevelDebug {
@@ -334,54 +331,6 @@ func (h *noDebugHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h *noDebugHandler) WithGroup(name string) slog.Handler {
 	return &noDebugHandler{handler: h.handler.WithGroup(name)}
-}
-
-func (h *disabledHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return false // Never enable any logging
-}
-
-func (h *disabledHandler) Handle(ctx context.Context, record slog.Record) error {
-	return nil // Do nothing
-}
-
-func (h *disabledHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return h // Return self
-}
-
-func (h *disabledHandler) WithGroup(name string) slog.Handler {
-	return h // Return self
-}
-
-// debugDisabledHandler wraps a handler but lies about debug being disabled
-type debugDisabledHandler struct {
-	slog.Handler
-}
-
-func (h *debugDisabledHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	// Lie about debug being disabled - always return false for debug level
-	if level == slog.LevelDebug {
-		return false
-	}
-	return h.Handler.Enabled(ctx, level)
-}
-
-// noopHandler completely discards all log messages
-type noopHandler struct{}
-
-func (h *noopHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return false // Never enable any logging
-}
-
-func (h *noopHandler) Handle(ctx context.Context, record slog.Record) error {
-	return nil // Do nothing
-}
-
-func (h *noopHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return h // Return self
-}
-
-func (h *noopHandler) WithGroup(name string) slog.Handler {
-	return h // Return self
 }
 
 func runManufacturingStation(ctx context.Context) error {

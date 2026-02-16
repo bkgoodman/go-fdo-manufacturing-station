@@ -138,7 +138,7 @@
 - [ ] Push service unit tests covering success, retry scheduling, and max-attempt failures.
 - [ ] Transmission store tests for `CreatePending`, `MarkAttempt`, and `PendingForRetry` edge cases.
 - [ ] Destination resolver tests (callback success/failure, DID, static fallback ordering).
-- [ ] Push client test harness (mock HTTP server) to validate multipart upload + auth token header.
+- [x] Push client integration test harness (HTTP receiver) to validate multipart upload + auth token header (`tests/test_voucher_push.sh`).
 - [ ] Retry worker integration test with in-memory store to ensure records are retried once `retry_after` elapses.
 
 ## CLI Coverage
@@ -149,6 +149,7 @@
 
 ## Operational Tests
 
+- [x] Push receiver end-to-end validation (`tests/test_voucher_push.sh` compares disk vs receiver artifacts).
 - [ ] Log inspection: ensure structured logs exist for queue, retries, success, failure, manual actions.
 - [ ] Config toggles: push disabled, retry worker disabled, callback off → static fallback.
 - [ ] File retention flags (`retain_files`, `delete_after_success`).
