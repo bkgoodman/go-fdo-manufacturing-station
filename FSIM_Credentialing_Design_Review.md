@@ -7,21 +7,25 @@ We've created a **simplified, practical credentialing FSIM handler system** that
 ## ✅ Key Achievements
 
 ### 1. **Simplified Configuration Structure**
+
 - **Removed over-engineering** - No complex variable definitions, validation configs, or categories
 - **Focus on essentials** - Just shell commands and file paths
 - **Protocol-driven** - Variables come directly from FSIM specification
 
 ### 2. **Complete Variable Enumeration**
+
 - **Actual protocol variables only** - 15-20 real variables from FSIM spec
 - **Clear source mapping** - Protocol vs System vs Configuration variables
 - **Validation table** - Security rules for each variable type
 
 ### 3. **Flexible Flow Control**
+
 - **Simple handlers** - Direct command execution for provisioned credentials
 - **Multi-phase handlers** - Generate → Send → Receive → Install for complex flows
 - **Named payload mapping** - Clear file handling without ordering dependencies
 
 ### 4. **Variable Modifier System**
+
 - **Flexible syntax** - `{variable:modifier1:modifier2}`
 - **Filter modifiers** - Transform values (alphanum, lower, safe, filename)
 - **Validator modifiers** - Reject invalid input (required, username, url, email)
@@ -30,6 +34,7 @@ We've created a **simplified, practical credentialing FSIM handler system** that
 ## 📋 Configuration Examples
 
 ### Simple Provisioned Credential
+
 ```yaml
 password:
   commands:
@@ -39,6 +44,7 @@ password:
 ```
 
 ### Complex Certificate Enrollment
+
 ```yaml
 x509_cert:
   generate_phase:
@@ -58,6 +64,7 @@ x509_cert:
 ```
 
 ### Sysconfig with Modifiers
+
 ```yaml
 hostname:
   command: "hostnamectl set-hostname {value:alphanum:lower:trim}"
@@ -72,6 +79,7 @@ admin_user:
 ## 🛡️ Security Approach
 
 ### Built-in Protection
+
 - **Automatic validation** - Protocol variables validated against patterns
 - **Shell injection prevention** - Filter dangerous characters
 - **Format validation** - URLs, emails, timestamps, usernames
@@ -79,6 +87,7 @@ admin_user:
 - **Sensitive data handling** - No logging for passwords/secrets
 
 ### Modifier System Benefits
+
 - **Prevents injection** - `:safe` removes shell metacharacters
 - **Fixes accidents** - `:alphanum`, `:nospace` clean user input
 - **Enforces rules** - `:required`, `:length:N` validate requirements
@@ -87,6 +96,7 @@ admin_user:
 ## 🔄 Integration Strategy
 
 ### Seamless Generic Handler Integration
+
 ```yaml
 # config_generic.yaml
 handlers:
@@ -108,6 +118,7 @@ handlers:
 ```
 
 ### FSIM Protocol Support
+
 - **Three flows supported** - Provisioned, Enrolled, Registered
 - **Chunked messaging** - Automatic handling of large payloads
 - **Error reporting** - Clear feedback to FDO server
@@ -116,6 +127,7 @@ handlers:
 ## 📊 Variable Reference
 
 ### Protocol Variables (from FSIM spec)
+
 | Variable | Source | Type | Example |
 |----------|--------|------|---------|
 | `{username}` | Protocol | string | "admin" |
@@ -127,6 +139,7 @@ handlers:
 | `{key_type}` | Protocol | enum | "ed25519" |
 
 ### System Variables
+
 | Variable | Source | Type | Example |
 |----------|--------|------|---------|
 | `{device_id}` | System | string | "abc123-def456" |
@@ -135,6 +148,7 @@ handlers:
 ## 🚀 Implementation Readiness
 
 ### Core Components
+
 1. ✅ **Configuration structure** - Simple YAML format
 2. ✅ **Variable system** - Protocol-driven with validation
 3. ✅ **Modifier system** - Flexible sanitization
@@ -142,6 +156,7 @@ handlers:
 5. ✅ **Security framework** - Built-in protection
 
 ### Next Steps
+
 1. **Implement credentialing handlers** - Core execution engine
 2. **Add modifier system** - To existing generic handlers
 3. **Integrate FSIM messages** - Chunked payload handling
@@ -151,18 +166,21 @@ handlers:
 ## 🎯 Design Benefits
 
 ### For Users
+
 - **Simple configuration** - Just shell commands and file paths
 - **Flexible modifiers** - Easy sanitization without complexity
 - **Clear examples** - Realistic use cases documented
 - **Good error messages** - Helpful validation feedback
 
 ### For Developers
+
 - **Protocol-aligned** - Leverages existing FSIM specification
 - **Framework-compatible** - Integrates with generic handlers
 - **Security-first** - Built-in protection against common issues
 - **Extensible** - Easy to add new credential types
 
 ### For Security
+
 - **Injection prevention** - Multiple layers of protection
 - **Input validation** - Comprehensive format checking
 - **Sensitive data handling** - Proper logging and storage

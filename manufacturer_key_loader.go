@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/protocol"
 )
 
@@ -75,10 +76,14 @@ func protocolPublicKeyToCrypto(protocolPubKey *protocol.PublicKey) (crypto.Publi
 func publicKeyToProtocol(pubKey interface{}) (protocol.PublicKey, error) {
 	switch key := pubKey.(type) {
 	case *ecdsa.PublicKey:
-		// Encode ECDSA public key to ASN.1 DER
+		// Encode ECDSA public key to ASN.1 DER wrapped in CBOR bytes
 		derBytes, err := x509.MarshalPKIXPublicKey(key)
 		if err != nil {
 			return protocol.PublicKey{}, fmt.Errorf("failed to marshal ECDSA public key: %w", err)
+		}
+		cborEncoded, err := cbor.Marshal(derBytes)
+		if err != nil {
+			return protocol.PublicKey{}, fmt.Errorf("failed to CBOR-encode ECDSA public key: %w", err)
 		}
 
 		// Determine key type
@@ -95,14 +100,18 @@ func publicKeyToProtocol(pubKey interface{}) (protocol.PublicKey, error) {
 		return protocol.PublicKey{
 			Type:     keyType,
 			Encoding: protocol.X509KeyEnc,
-			Body:     derBytes,
+			Body:     cborEncoded,
 		}, nil
 
 	case *rsa.PublicKey:
-		// Encode RSA public key to ASN.1 DER
+		// Encode RSA public key to ASN.1 DER wrapped in CBOR bytes
 		derBytes, err := x509.MarshalPKIXPublicKey(key)
 		if err != nil {
 			return protocol.PublicKey{}, fmt.Errorf("failed to marshal RSA public key: %w", err)
+		}
+		cborEncoded, err := cbor.Marshal(derBytes)
+		if err != nil {
+			return protocol.PublicKey{}, fmt.Errorf("failed to CBOR-encode RSA public key: %w", err)
 		}
 
 		// Determine key type
@@ -119,7 +128,7 @@ func publicKeyToProtocol(pubKey interface{}) (protocol.PublicKey, error) {
 		return protocol.PublicKey{
 			Type:     keyType,
 			Encoding: protocol.X509KeyEnc,
-			Body:     derBytes,
+			Body:     cborEncoded,
 		}, nil
 
 	default:

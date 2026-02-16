@@ -47,7 +47,7 @@ func (v *VoucherDiskService) SaveVoucherToDisk(ov *fdo.Voucher, serialNumber str
 	filepath := filepath.Join(v.config.SaveToDisk.Directory, filename)
 
 	// Convert voucher to the same format as go-fdo command-line tools
-	voucherText, err := v.formatVoucherForDisk(ov, serialNumber)
+	voucherText, err := formatVoucherForDisk(ov)
 	if err != nil {
 		return fmt.Errorf("failed to format voucher for disk: %w", err)
 	}
@@ -62,7 +62,7 @@ func (v *VoucherDiskService) SaveVoucherToDisk(ov *fdo.Voucher, serialNumber str
 }
 
 // formatVoucherForDisk formats the voucher in the same style as go-fdo command-line tools
-func (v *VoucherDiskService) formatVoucherForDisk(ov *fdo.Voucher, serialNumber string) (string, error) {
+func formatVoucherForDisk(ov *fdo.Voucher) (string, error) {
 	// Serialize voucher to CBOR
 	voucherBytes, err := cbor.Marshal(ov)
 	if err != nil {

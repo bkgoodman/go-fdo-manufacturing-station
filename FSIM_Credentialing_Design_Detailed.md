@@ -11,6 +11,7 @@ This design provides a comprehensive handler system for the FDO `fdo.credentials
 ## Real FSIM Message Flows
 
 ### Provisioned Credentials (Owner → Device)
+
 ```
 Owner → Device: fdo.credentials:credential-begin (metadata)
 Owner → Device: fdo.credentials:credential-data-0..N (chunked credential data)
@@ -19,7 +20,8 @@ Device → Owner: fdo.credentials:credential-result (acknowledgment)
 ```
 
 ### Enrolled Credentials (Device ↔ Owner)
-```
+
+```text
 Device → Owner: fdo.credentials:request-begin (metadata)
 Device → Owner: fdo.credentials:request-data-0..N (chunked CSR/JWK)
 Device → Owner: fdo.credentials:request-end (completion)
@@ -30,6 +32,7 @@ Device → Owner: fdo.credentials:response-result (acknowledgment)
 ```
 
 ### Registered Credentials (Device → Owner)
+
 ```
 Owner → Device: fdo.credentials:pubkey-request (request for key)
 Device → Owner: fdo.credentials:pubkey-begin (metadata)
@@ -620,7 +623,8 @@ handlers:
 ```
 
 **FSIM Flow:**
-```
+
+```text
 Owner → Device: fdo.credentials:credential-begin = {
     -1: "user-credential-001",
     -2: "password",
@@ -668,7 +672,8 @@ handlers:
 ```
 
 **FSIM Flow:**
-```
+
+```text
 Device → Owner: fdo.credentials:request-begin = {
     -1: "device-mtls-cert",
     -2: "x509_cert",
@@ -714,7 +719,8 @@ handlers:
 ```
 
 **FSIM Flow:**
-```
+
+```text
 Owner → Device: fdo.credentials:pubkey-request = {
     -1: "device-config-access",
     -2: "ssh_public_key",
@@ -738,18 +744,21 @@ Owner → Device: fdo.credentials:pubkey-result = [0, "Public key registered wit
 ## Security Considerations
 
 ### Data Protection
+
 - **Private keys** never leave the device (except in server-generated key flow)
 - **Passwords** are marked with `no_log: true` and encrypted at rest
 - **API keys** and **secrets** stored with restricted file permissions
 - **Temporary files** are securely cleaned up after use
 
 ### Command Validation
+
 - **Input validation** for all user-provided data
 - **Command sanitization** to prevent injection attacks
 - **Permission checking** before executing privileged commands
 - **Sandbox execution** for complex operations
 
 ### Audit Trail
+
 - **Comprehensive logging** of all credential operations
 - **Hash verification** for all chunked transfers
 - **Error reporting** back to FDO server with appropriate codes

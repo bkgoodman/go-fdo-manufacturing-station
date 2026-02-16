@@ -91,6 +91,7 @@ Variables are provided directly by the FSIM protocol - no configuration needed.
 Users receive credential data as JSON files in their temporary directory. Each credential type has its own JSON structure:
 
 ### Password Credentials
+
 ```json
 {
   "username": "admin",
@@ -100,6 +101,7 @@ Users receive credential data as JSON files in their temporary directory. Each c
 ```
 
 ### API Key Credentials  
+
 ```json
 {
   "api_key": "sk_live_abc123...",
@@ -108,6 +110,7 @@ Users receive credential data as JSON files in their temporary directory. Each c
 ```
 
 ### OAuth2 Client Credentials
+
 ```json
 {
   "client_id": "device-001",
@@ -118,6 +121,7 @@ Users receive credential data as JSON files in their temporary directory. Each c
 ```
 
 ### Bearer Token Credentials
+
 ```json
 {
   "token": "eyJhbGciOiJSUzI1NiIs...",
@@ -131,7 +135,9 @@ Users write shell commands or scripts to parse these JSON files and apply the cr
 ## Flow Types
 
 ### Simple Handlers
+
 For provisioned credentials - just execute commands when data arrives:
+
 ```yaml
 password:
   commands:
@@ -147,7 +153,9 @@ oauth2_client_secret:
 ```
 
 ### Multi-Phase Handlers  
+
 For enrolled and registered credentials:
+
 ```yaml
 x509_cert:
   generate_phase:
@@ -161,14 +169,18 @@ x509_cert:
 ## Security
 
 ### Automatic Validation
+
 Built-in validation for all protocol variables:
+
 - **No shell injection** - Filter dangerous characters
 - **Format validation** - URLs, emails, timestamps
 - **Length limits** - Prevent buffer overflows
 - **Required fields** - Ensure needed data is present
 
 ### High-Security Variables
+
 Special handling for sensitive data:
+
 - `{password}`, `{client_secret}` - No logging, strict filtering
 - `{token}` - JWT format validation
 - `{api_key}` - API key format validation
@@ -178,11 +190,13 @@ Special handling for sensitive data:
 For sysconfig handlers, use modifiers to validate and sanitize values:
 
 ### Modifier Syntax
+
 ```yaml
 {variable:modifier1:modifier2}
 ```
 
 ### Filter Modifiers (change the value)
+
 - `:nospace` - Remove all spaces
 - `:underscore` - Replace spaces with underscores  
 - `:alphanum` - Keep only alphanumeric characters
@@ -197,6 +211,7 @@ For sysconfig handlers, use modifiers to validate and sanitize values:
 - `:ifempty:value` - Alternative syntax for default value
 
 ### Validator Modifiers (fail on mismatch)
+
 - `:required` - Fail if value is empty
 - `:username` - Validate username format (alphanumeric + _-)
 - `:password` - Validate password (no shell chars)
@@ -207,6 +222,7 @@ For sysconfig handlers, use modifiers to validate and sanitize values:
 - `:minlength:8` - Validate min length
 
 ### Sysconfig Examples
+
 ```yaml
 handlers:
   sysconfig:
@@ -236,6 +252,7 @@ handlers:
 ## Implementation
 
 ### Handler Structure
+
 ```go
 type CredentialHandler struct {
     Commands       []string         `json:",omitempty"`
@@ -251,6 +268,7 @@ type PhaseConfig struct {
 ```
 
 ### Execution Logic
+
 ```go
 func (h *CredentialHandler) Handle(data map[string]interface{}) error {
     if h.GeneratePhase != nil {
@@ -293,6 +311,7 @@ handlers:
 The variable modifier system provides flexible validation and sanitization for ALL FSIM handler types (sysconfig, payload, credentialing, Wi-Fi). This prevents both accidental issues and malicious injection attacks while making configuration user-friendly.
 
 ### Modifier Syntax
+
 ```yaml
 {variable:modifier1:modifier2:modifier3}
 ```
@@ -300,6 +319,7 @@ The variable modifier system provides flexible validation and sanitization for A
 Modifiers are applied in order from left to right. Filter modifiers change the value, while validator modifiers can reject invalid input.
 
 ### Filter Modifiers (change the value)
+
 - `:nospace` - Remove all spaces
 - `:underscore` - Replace spaces with underscores  
 - `:alphanum` - Keep only alphanumeric characters
@@ -314,6 +334,7 @@ Modifiers are applied in order from left to right. Filter modifiers change the v
 - `:ifempty:value` - Alternative syntax for default value
 
 ### Validator Modifiers (fail on mismatch)
+
 - `:required` - Fail if value is empty
 - `:username` - Validate username format (alphanumeric + _-)
 - `:password` - Validate password (no shell chars)
@@ -326,6 +347,7 @@ Modifiers are applied in order from left to right. Filter modifiers change the v
 ### Examples Across Handler Types
 
 #### SysConfig Examples
+
 ```yaml
 handlers:
   sysconfig:
@@ -360,6 +382,7 @@ handlers:
 ```
 
 #### Credentialing Examples
+
 ```yaml
 handlers:
   credentialing:
@@ -374,6 +397,7 @@ handlers:
 ```
 
 #### Wi-Fi Examples
+
 ```yaml
 handlers:
   wifi:
@@ -387,6 +411,7 @@ handlers:
 ```
 
 #### Payload Examples
+
 ```yaml
 handlers:
   payload:
@@ -397,6 +422,7 @@ handlers:
 ```
 
 ### Security Benefits
+
 - **Prevents shell injection** - `:safe` modifier removes dangerous characters
 - **Fixes accidents** - `:alphanum`, `:nospace` clean user input
 - **Enforces rules** - `:required`, `:length:N` validate requirements
@@ -409,6 +435,7 @@ handlers:
 Payload handlers provide simple file-based processing for different MIME types received through the FDO payload FSIM module:
 
 ### Configuration Structure
+
 ```yaml
 handlers:
   payload:
@@ -434,6 +461,7 @@ handlers:
 ```
 
 ### Available Variables
+
 - `{filename}` - The original payload filename (for use in filename template)
 - `{mime_type}` - The MIME type of the payload
 - `{size}` - Payload size in bytes
@@ -444,6 +472,7 @@ handlers:
 ### Examples
 
 #### JSON Configuration Processing
+
 ```yaml
 application/json:
   filename: "/tmp/device_config_{filename}.json"
@@ -453,6 +482,7 @@ application/json:
 ```
 
 #### Firmware Update
+
 ```yaml
 application/octet-stream:
   filename: "/tmp/firmware_{filename}"
@@ -462,6 +492,7 @@ application/octet-stream:
 ```
 
 #### Certificate Bundle
+
 ```yaml
 application/x-pem-file:
   filename: "/tmp/certs_{filename}.pem"
@@ -471,6 +502,7 @@ application/x-pem-file:
 ```
 
 #### Cloud-init Configuration
+
 ```yaml
 application/cloud-init:
   filename: "/tmp/cloudinit.dat"
@@ -479,6 +511,7 @@ application/cloud-init:
 ```
 
 ### Security Considerations
+
 - **File validation** - Payloads are validated against MIME type before processing
 - **Path safety** - `{filename}` is sanitized to prevent directory traversal
 - **Size limits** - Maximum payload size enforced before saving
@@ -489,6 +522,7 @@ application/cloud-init:
 Wi-Fi handlers provide network configuration through the FDO Wi-Fi FSIM module, similar to credentialing but focused on network settings:
 
 ### Configuration Structure
+
 ```yaml
 handlers:
   wifi:
@@ -506,6 +540,7 @@ handlers:
 ```
 
 ### Available Variables
+
 - `{ssid}` - Network name (from Wi-Fi credential data)
 - `{password}` - Network password (from Wi-Fi credential data)
 - `{username}` - Enterprise username (optional, from Wi-Fi credential data)
@@ -515,6 +550,7 @@ handlers:
 ### Examples
 
 #### Simple WPA2 Network
+
 ```yaml
 ssid:
   commands:
@@ -523,6 +559,7 @@ ssid:
 ```
 
 #### Enterprise Network (802.1X)
+
 ```yaml
 enterprise:
   commands:
@@ -531,6 +568,7 @@ enterprise:
 ```
 
 #### Hidden Network
+
 ```yaml
 hidden:
   commands:
@@ -539,6 +577,7 @@ hidden:
 ```
 
 #### Open Network (No Password)
+
 ```yaml
 open:
   commands:
@@ -547,6 +586,7 @@ open:
 ```
 
 ### Security Considerations
+
 - **Password protection** - Wi-Fi passwords are not logged
 - **Command validation** - SSID and password values are sanitized
 - **Network isolation** - Wi-Fi commands run with network privileges only
@@ -555,6 +595,7 @@ open:
 ## Error Handling
 
 All handlers report errors back to the FDO server:
+
 - **Command execution failures** - Shell command errors
 - **Validation failures** - Invalid variable formats
 - **File system errors** - Permission issues, disk space
@@ -563,6 +604,7 @@ All handlers report errors back to the FDO server:
 ## Examples
 
 ### Password Provisioning
+
 ```
 Server sends: {"username": "admin", "password": "secret123"}
 Device runs: useradd -m admin
@@ -571,6 +613,7 @@ Result: Success/failure back to server
 ```
 
 ### Certificate Enrollment
+
 ```
 Device generates: CSR file
 Device sends: CSR to server
@@ -580,6 +623,7 @@ Result: Success/failure back to server
 ```
 
 ### SSH Key Registration
+
 ```
 Device generates: SSH key pair
 Device sends: Public key to server

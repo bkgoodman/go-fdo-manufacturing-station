@@ -124,6 +124,20 @@ func DefaultConfig() *Config {
 				ExternalCommand: "",
 				Timeout:         30 * time.Second,
 			},
+			VoucherFiles: struct {
+				Directory string `yaml:"directory"`
+			}{
+				Directory: "data/vouchers",
+			},
+			DestinationCallback: struct {
+				Enabled         bool          `yaml:"enabled"`
+				ExternalCommand string        `yaml:"external_command"`
+				Timeout         time.Duration `yaml:"timeout"`
+			}{
+				Enabled:         false,
+				ExternalCommand: "",
+				Timeout:         10 * time.Second,
+			},
 			DIDCache: DIDCache{
 				Enabled:         false,              // Disabled by default
 				RefreshInterval: 1 * time.Hour,      // Check for updates every hour
@@ -131,6 +145,46 @@ func DefaultConfig() *Config {
 				FailureBackoff:  1 * time.Hour,      // Backoff after failed refresh
 				PurgeUnused:     7 * 24 * time.Hour, // Delete if not used for 7 days
 				PurgeOnStartup:  false,              // Don't purge on startup by default
+			},
+			PushService: struct {
+				Enabled            bool          `yaml:"enabled"`
+				URL                string        `yaml:"url"`
+				AuthToken          string        `yaml:"auth_token"`
+				Mode               string        `yaml:"mode"`
+				RetainFiles        bool          `yaml:"retain_files"`
+				DeleteAfterSuccess bool          `yaml:"delete_after_success"`
+				RetryInterval      time.Duration `yaml:"retry_interval"`
+				MaxAttempts        int           `yaml:"max_attempts"`
+			}{
+				Enabled:            false,
+				URL:                "",
+				AuthToken:          "",
+				Mode:               "fallback",
+				RetainFiles:        true,
+				DeleteAfterSuccess: false,
+				RetryInterval:      8 * time.Hour,
+				MaxAttempts:        5,
+			},
+			DIDPush: struct {
+				Enabled bool `yaml:"enabled"`
+			}{
+				Enabled: true,
+			},
+			RetryWorker: struct {
+				Enabled       bool          `yaml:"enabled"`
+				RetryInterval time.Duration `yaml:"retry_interval"`
+				MaxAttempts   int           `yaml:"max_attempts"`
+			}{
+				Enabled:       true,
+				RetryInterval: 8 * time.Hour,
+				MaxAttempts:   5,
+			},
+			Retention: struct {
+				KeepIndefinitely bool          `yaml:"keep_indefinitely"`
+				PurgeAfter       time.Duration `yaml:"purge_after"`
+			}{
+				KeepIndefinitely: true,
+				PurgeAfter:       0,
 			},
 		},
 	}

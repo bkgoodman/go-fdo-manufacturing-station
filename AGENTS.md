@@ -8,8 +8,7 @@ You will need to run this server to test - but user will be responsible for runn
 - Log it's output for subsequent introspection
 - Kill and restart when/where needed
 
-
-# Definition of "Done" 
+## Definition of "Done"
 
 Before we call stuff done and complete, we must be able to:
 

@@ -22,6 +22,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/fido-device-onboard/go-fdo"
@@ -36,6 +38,154 @@ func init() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 }
 
+func formatRetryAfter(rec *VoucherTransmissionRecord) string {
+	if rec == nil || !rec.RetryAfter.Valid {
+		return "-"
+	}
+	return rec.RetryAfter.Time.UTC().Format(time.RFC3339)
+}
+
+func summarizeDestination(rec *VoucherTransmissionRecord) string {
+	if rec == nil || rec.DestinationURL == "" {
+		return "(pending)"
+	}
+	source := rec.DestinationSource
+	if source == "" {
+		source = "static"
+	}
+	return fmt.Sprintf("%s [%s]", rec.DestinationURL, source)
+}
+
+func handleVoucherCommands(ctx context.Context) (bool, error) {
+	if !*voucherList && *voucherRetransmitID == 0 && *voucherPurgeID == 0 {
+		return false, nil
+	}
+
+	state, err := sqlite.Open(config.Database.Path, config.Database.Password)
+	if err != nil {
+		return true, fmt.Errorf("failed to open database: %w", err)
+	}
+	defer state.Close()
+
+	store := NewVoucherTransmissionStore(state.DB())
+	if err := store.Init(ctx); err != nil {
+		return true, fmt.Errorf("failed to initialize transmission store: %w", err)
+	}
+
+	switch {
+	case *voucherList:
+		return true, runVoucherList(ctx, store)
+	case *voucherRetransmitID > 0:
+		return true, runVoucherRetransmit(ctx, state, store, *voucherRetransmitID)
+	case *voucherPurgeID > 0:
+		return true, runVoucherPurge(ctx, store, *voucherPurgeID)
+	default:
+		return true, fmt.Errorf("no voucher command matched")
+	}
+}
+
+func runVoucherList(ctx context.Context, store *VoucherTransmissionStore) error {
+	status := strings.TrimSpace(*voucherListStatus)
+	if status != "" {
+		allowed := map[string]bool{
+			transmissionStatusPending:   true,
+			transmissionStatusSucceeded: true,
+			transmissionStatusFailed:    true,
+		}
+		if !allowed[status] {
+			return fmt.Errorf("invalid status filter %q", status)
+		}
+	}
+
+	records, err := store.ListTransmissions(ctx, status, strings.TrimSpace(*voucherListGUID), *voucherListLimit)
+	if err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		fmt.Println("No voucher transmissions found")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tGUID\tSTATUS\tATTEMPTS\tDESTINATION\tNEXT_RETRY\tLAST_ERROR\tUPDATED")
+	for _, rec := range records {
+		fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+			rec.ID,
+			rec.VoucherGUID,
+			rec.Status,
+			rec.Attempts,
+			summarizeDestination(&rec),
+			formatRetryAfter(&rec),
+			truncateString(rec.LastError, 60),
+			rec.UpdatedAt.Format(time.RFC3339),
+		)
+	}
+	return w.Flush()
+}
+
+func runVoucherRetransmit(ctx context.Context, state *sqlite.DB, store *VoucherTransmissionStore, id int64) error {
+	rec, err := store.FetchByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to load transmission %d: %w", id, err)
+	}
+
+	callbackExecutor := NewExternalCommandExecutor(config.VoucherManagement.DestinationCallback.ExternalCommand, config.VoucherManagement.DestinationCallback.Timeout)
+	var didResolver *DIDResolver
+	if config.VoucherManagement.DIDCache.Enabled {
+		didResolver = NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+	}
+	destinationResolver := NewVoucherDestinationResolver(&config.VoucherManagement, callbackExecutor, didResolver)
+	pushClient := NewVoucherPushClient()
+	pushService := NewVoucherPushService(&config.VoucherManagement, store, destinationResolver, pushClient)
+
+	slog.Info("manual voucher retransmit requested",
+		"id", rec.ID,
+		"guid", rec.VoucherGUID,
+		"dest", rec.DestinationURL,
+		"attempts", rec.Attempts,
+		"last_error", rec.LastError,
+	)
+	if err := pushService.AttemptRecord(ctx, rec); err != nil {
+		return fmt.Errorf("voucher retransmit %d failed: %w", id, err)
+	}
+	slog.Info("manual voucher retransmit completed",
+		"id", rec.ID,
+		"guid", rec.VoucherGUID,
+		"destination", rec.DestinationURL,
+	)
+	fmt.Printf("Voucher transmission %d retried successfully\n", id)
+	return nil
+}
+
+func runVoucherPurge(ctx context.Context, store *VoucherTransmissionStore, id int64) error {
+	rec, err := store.FetchByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("failed to load transmission %d: %w", id, err)
+	}
+	slog.Info("manual voucher purge requested", "id", rec.ID, "guid", rec.VoucherGUID, "file", rec.FilePath)
+	if rec.FilePath != "" {
+		if err := os.Remove(rec.FilePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("failed to delete voucher file %s: %w", rec.FilePath, err)
+		}
+	}
+	if err := store.DeleteByID(ctx, id); err != nil {
+		return fmt.Errorf("failed to delete transmission %d: %w", id, err)
+	}
+	slog.Info("voucher transmission purged", "id", rec.ID, "guid", rec.VoucherGUID)
+	fmt.Printf("Voucher transmission %d purged\n", id)
+	return nil
+}
+
+func truncateString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
+}
+
 // Global configuration
 var config *Config
 
@@ -47,6 +197,12 @@ var (
 	purgeDIDCacheExpired   = flag.Bool("purge-did-cache-expired", false, "Purge expired DID cache entries then exit")
 	purgeDIDCacheAll       = flag.Bool("purge-did-cache-all", false, "Purge ALL DID cache entries then exit")
 	purgeDIDCacheOnStartup = flag.Bool("purge-did-cache-on-startup", false, "Purge expired DID cache entries on startup then continue")
+	voucherList            = flag.Bool("voucher-list", false, "List voucher transmissions and exit")
+	voucherListStatus      = flag.String("voucher-status", "", "Filter voucher list by status (pending|succeeded|failed)")
+	voucherListGUID        = flag.String("voucher-guid", "", "Filter voucher list by voucher GUID")
+	voucherListLimit       = flag.Int("voucher-limit", 25, "Limit number of voucher transmissions listed")
+	voucherRetransmitID    = flag.Int64("voucher-retransmit-id", 0, "Retransmit a voucher transmission by ID and exit")
+	voucherPurgeID         = flag.Int64("voucher-purge-id", 0, "Purge a voucher transmission (and file if present) by ID and exit")
 )
 
 func main() {
@@ -134,6 +290,13 @@ func main() {
 	}
 
 	ctx := context.Background()
+	if ran, err := handleVoucherCommands(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Voucher command failed: %v\n", err)
+		os.Exit(1)
+	} else if ran {
+		os.Exit(0)
+	}
+
 	if err := runManufacturingStation(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -391,11 +554,32 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 	// Initialize voucher disk service
 	voucherDiskService := NewVoucherDiskService(&config.VoucherManagement)
 
+	// Initialize voucher file store (GUID-based .fdoov retention)
+	voucherFileStore := NewVoucherFileStore(&config.VoucherManagement)
+
 	// Initialize OVEExtra data service
 	oveExtraDataService := NewOVEExtraDataService(
 		&config.VoucherManagement.OVEExtraData,
 		NewExternalCommandExecutor(config.VoucherManagement.OVEExtraData.ExternalCommand, config.VoucherManagement.OVEExtraData.Timeout),
 	)
+
+	// Initialize voucher transmission store (metadata only)
+	transmissionStore := NewVoucherTransmissionStore(state.DB())
+	if err := transmissionStore.Init(ctx); err != nil {
+		return fmt.Errorf("failed to initialize voucher transmission store: %w", err)
+	}
+
+	// Destination resolver & push service wiring
+	callbackExecutor := NewExternalCommandExecutor(config.VoucherManagement.DestinationCallback.ExternalCommand, config.VoucherManagement.DestinationCallback.Timeout)
+	var didResolver *DIDResolver
+	if config.VoucherManagement.DIDCache.Enabled {
+		didResolver = NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+	}
+	destinationResolver := NewVoucherDestinationResolver(&config.VoucherManagement, callbackExecutor, didResolver)
+	voucherPushClient := NewVoucherPushClient()
+	voucherPushService := NewVoucherPushService(&config.VoucherManagement, transmissionStore, destinationResolver, voucherPushClient)
+	voucherRetryWorker := NewVoucherRetryWorker(&config.VoucherManagement, transmissionStore, voucherPushService)
+	voucherRetryWorker.Start(ctx)
 
 	voucherCallbackService := NewVoucherCallbackService(
 		&config.VoucherManagement,
@@ -403,6 +587,8 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 		voucherSigningService,
 		voucherUploadService,
 		voucherDiskService,
+		voucherFileStore,
+		voucherPushService,
 		oveExtraDataService,
 		deviceCAKey, // Use device CA key for signing vouchers
 	)

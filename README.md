@@ -130,6 +130,8 @@ Multiple options for handling signed vouchers, supporting different operational 
 - **Error Handling**: Configurable retry and error management
 - **Protocol Flexibility**: HTTP, FTP, custom protocols via script integration
 
+> 📚 See [docs/voucher_transmission.md](docs/voucher_transmission.md) for destination resolution order, retry worker details, and CLI tooling (`--voucher-list`, `--voucher-retransmit-id`, `--voucher-purge-id`).
+
 ### 📋 **OVEExtra Data Integration**
 
 FDO provides a mechanism to add arbitrary metadata to vouchers, enabling rich device information:
@@ -581,11 +583,13 @@ rendezvous:
 #### **⚠️ Simplification Notes**
 
 **For simplicity, this implementation only supports:**
+
 - ✅ **IP addresses and DNS names** (auto-detected)
 - ✅ **Port numbers** (1-65535)
 - ✅ **HTTP and HTTPS protocols** only
 
 **Not supported:**
+
 - ❌ WiFi credentials (SSID/password)
 - ❌ Certificate hashes
 - ❌ Custom protocols (CoAP, TCP)
@@ -604,6 +608,7 @@ This simplification covers **95% of common use cases** while keeping the configu
 #### **Future Enhancements**
 
 For more sophisticated deployments, consider implementing:
+
 - **Per-customer RV info** based on device serial or model
 - **Dynamic RV lookup** from external manufacturing systems
 - **Geographic-based RV** routing to nearest owner services

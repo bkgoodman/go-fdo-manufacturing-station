@@ -1,5 +1,7 @@
 # SPDX-FileCopyrightText: (C) 2026 Dell Technologies
+
 # SPDX-License-Identifier: Apache 2.0
+
 # Author: Brad Goodman
 
 # TODO: Voucher Management Enhancements
@@ -11,6 +13,7 @@
 **Status:** ✅ COMPLETED - Real device serial numbers now work!
 
 **Implementation:**
+
 - ✅ Added `DeviceSelfInfo(context.Context) (*custom.DeviceMfgInfo, error)` to SQLite DB
 - ✅ Used existing `SetDeviceSelfInfo(context.Context, *custom.DeviceMfgInfo) error` in SQLite DB  
 - ✅ Store device info in session table (not persistent vouchers table)
@@ -18,6 +21,7 @@
 - ✅ Updated voucher callback to retrieve real serial number
 
 **Files Modified:**
+
 - ✅ `go-fdo/sqlite/sqlite.go` - Added DeviceSelfInfo method
 - ✅ `main.go` - Enabled device info storage in DeviceInfo callback
 - ✅ `voucher_callback.go` - Real serial number retrieval with GUID fallback
@@ -27,11 +31,13 @@
 **Status:** ✅ COMPLETED - Certificate parsing now works!
 
 **Implementation:**
+
 - ✅ Completed `parseCertificatePublicKey()` function in `owner_key_service.go`
 - ✅ Use `x509.ParseCertificate()` to extract public key from certificates
 - Ready to test with certificate chains from external services
 
 **Files Modified:**
+
 - ✅ `owner_key_service.go` - Complete certificate parsing implementation
 
 ## Medium Priority
@@ -39,6 +45,7 @@
 ### 3. Add Error Handling and Logging
 
 **Enhancements Needed:**
+
 - Add structured logging for voucher operations
 - Better error messages for external command failures
 - Timeout handling improvements
@@ -47,6 +54,7 @@
 ### 4. Add Configuration Validation
 
 **Validations Needed:**
+
 - Validate external command templates have required variables
 - Check timeout values are reasonable
 - Verify file paths exist for signing keys
@@ -55,6 +63,7 @@
 ### 5. Add Unit Tests
 
 **Test Coverage Needed:**
+
 - External command executor tests
 - Owner key service tests (mock external commands)
 - Voucher upload service tests
@@ -66,6 +75,7 @@
 ### 6. Performance Optimizations
 
 **Potential Improvements:**
+
 - Cache external command results
 - Pool temporary files for voucher uploads
 - Optimize voucher serialization
@@ -74,6 +84,7 @@
 ### 7. Security Enhancements
 
 **Security Considerations:**
+
 - Validate external command paths to prevent injection
 - Sanitize variable substitutions
 - Add timeouts for all external operations

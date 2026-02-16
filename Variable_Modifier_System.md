@@ -36,8 +36,8 @@ Modifiers are applied in order from left to right. Filter modifiers change the v
 | `:required` | Fail if value is empty | "admin" | "" (empty) |
 | `:username` | Validate username format (alphanumeric + _-) | "admin_user" | "admin-user!" |
 | `:password` | Validate password (no shell chars) | "secret123" | "secret&123" |
-| `:url` | Validate URL format | "https://api.example.com" | "api.example.com" |
-| `:email` | Validate email format | "admin@example.com" | "admin@example" |
+| `:url` | Validate URL format | "<https://api.example.com>" | "api.example.com" |
+| `:email` | Validate email format | "<admin@example.com>" | "admin@example" |
 | `:numeric` | Validate numeric only | "1234" | "12a34" |
 | `:length:32` | Validate max length | "short" | "this_is_too_long_for_validation" |
 | `:minlength:8` | Validate min length | "longenough" | "short" |

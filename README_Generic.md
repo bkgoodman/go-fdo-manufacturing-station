@@ -88,10 +88,12 @@ handlers:
 ```
 
 **Template Variables:**
+
 - `{parameter}` - The parameter name (e.g., "hostname")
 - `{value}` - The parameter value (e.g., "my-device")
 
 **Examples:**
+
 ```yaml
 hostname:
   command: "hostname {value}"
@@ -121,12 +123,14 @@ handlers:
 ```
 
 **Template Variables:**
+
 - `{filename}` - Full path to the temporary payload file
 - `{mimetype}` - The MIME type (e.g., "application/json")
 - `{size}` - Payload size in bytes
 - `{name}` - Original payload filename
 
 **Examples:**
+
 ```yaml
 payload:
   temp_dir: "/tmp/fdo_payloads"
@@ -157,11 +161,13 @@ payload:
 The handler system provides comprehensive error reporting:
 
 ### SysConfig Errors
+
 - **Missing Handler**: "no handler configured for sysconfig parameter: X"
 - **Disabled Handler**: "handler disabled for sysconfig parameter: X"
 - **Command Execution**: "command execution failed: X"
 
 ### Payload Errors
+
 - **Unsupported Type**: "Unsupported payload type: X"
 - **No Handler**: "No handler configured for MIME type: X"
 - **File Operations**: "Failed to write payload to temp file: X"
@@ -172,17 +178,20 @@ All errors are reported back to the FDO server with appropriate status codes.
 ## Safety Features
 
 ### Safe Defaults
+
 - Commands use `echo` by default for safety
 - No actual system commands are executed unless explicitly configured
 - Temporary files are automatically cleaned up
 
 ### Validation
+
 - Configuration validation on startup
 - Absolute path requirement for temp directory
 - Template syntax validation
 - MIME type validation
 
 ### Error Handling
+
 - Graceful fallback to default handlers
 - Comprehensive error reporting
 - Safe failure modes
@@ -253,6 +262,7 @@ Run the built-in demo to test the handler system:
 ```
 
 This will:
+
 1. Load and validate the configuration
 2. Test all configured sysconfig handlers
 3. Test all configured payload handlers

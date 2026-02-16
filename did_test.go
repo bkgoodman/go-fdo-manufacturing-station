@@ -215,10 +215,12 @@ func TestDIDIntegration(t *testing.T) {
 	// Create test resolver
 	resolver := NewTestDIDResolver(nil, &DIDCache{Enabled: false}, true)
 
+	ctx := context.Background()
+
 	// Test 1: Mock did:key resolution
 	t.Run("MockDIDKey", func(t *testing.T) {
 		didURI := "did:key:test-12345"
-		publicKey, didURL, err := resolver.ResolveDIDKey(nil, didURI)
+		publicKey, didURL, err := resolver.ResolveDIDKey(ctx, didURI)
 		if err != nil {
 			t.Fatalf("Failed to resolve mock did:key: %v", err)
 		}
@@ -238,7 +240,7 @@ func TestDIDIntegration(t *testing.T) {
 	t.Run("DIDFile", func(t *testing.T) {
 		// Test with existing example file
 		didURI := "did:file:did_owner.json"
-		publicKey, didURL, err := resolver.ResolveDIDKey(nil, didURI)
+		publicKey, didURL, err := resolver.ResolveDIDKey(ctx, didURI)
 		if err != nil {
 			t.Fatalf("Failed to resolve did:file: %v", err)
 		}
@@ -261,7 +263,7 @@ func TestDIDIntegration(t *testing.T) {
 	// Test 3: File not found
 	t.Run("FileNotFound", func(t *testing.T) {
 		didURI := "did:file:nonexistent.json"
-		_, _, err := resolver.ResolveDIDKey(nil, didURI)
+		_, _, err := resolver.ResolveDIDKey(ctx, didURI)
 		if err == nil {
 			t.Fatal("Expected error for non-existent file")
 		}

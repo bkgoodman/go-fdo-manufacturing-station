@@ -24,6 +24,8 @@ type VoucherCallbackService struct {
 	voucherSigningService *VoucherSigningService
 	voucherUploadService  *VoucherUploadService
 	voucherDiskService    *VoucherDiskService
+	voucherFileStore      *VoucherFileStore
+	voucherPushService    *VoucherPushService
 	oveExtraDataService   *OVEExtraDataService
 	signingKey            crypto.Signer
 }
@@ -35,6 +37,8 @@ func NewVoucherCallbackService(
 	voucherSigningService *VoucherSigningService,
 	voucherUploadService *VoucherUploadService,
 	voucherDiskService *VoucherDiskService,
+	voucherFileStore *VoucherFileStore,
+	voucherPushService *VoucherPushService,
 	oveExtraDataService *OVEExtraDataService,
 	signingKey crypto.Signer,
 ) *VoucherCallbackService {
@@ -44,6 +48,8 @@ func NewVoucherCallbackService(
 		voucherSigningService: voucherSigningService,
 		voucherUploadService:  voucherUploadService,
 		voucherDiskService:    voucherDiskService,
+		voucherFileStore:      voucherFileStore,
+		voucherPushService:    voucherPushService,
 		oveExtraDataService:   oveExtraDataService,
 		signingKey:            signingKey,
 	}
@@ -90,6 +96,17 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 	fmt.Printf("🔍 DEBUG: Final values - serial=%s, model=%s, guid=%s\n", serial, model, guidStr)
 	fmt.Printf("🔍 DEBUG: VoucherSigning.Mode=%v, VoucherUpload.Enabled=%v, PersistToDB=%v\n",
 		v.config.VoucherSigning.Mode, v.config.VoucherUpload.Enabled, v.config.PersistToDB)
+
+	// Persist voucher to GUID-based file store so transmissions can reference it later
+	var voucherFilePath string
+	if v.voucherFileStore != nil {
+		if path, err := v.voucherFileStore.SaveVoucher(ov); err != nil {
+			fmt.Printf("⚠️  Failed to store voucher file for GUID %s: %v\n", guidStr, err)
+		} else {
+			voucherFilePath = path
+			fmt.Printf("🗂️  Voucher stored at %s\n", path)
+		}
+	}
 
 	// 1. Get owner signover key first (who we're signing TO)
 	var nextOwner crypto.PublicKey
@@ -199,6 +216,13 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 	if v.config.VoucherUpload.Enabled {
 		if err := v.voucherUploadService.UploadVoucher(ctx, serial, model, guidStr, ov, didURL); err != nil {
 			return false, fmt.Errorf("voucher upload failed: %w", err)
+		}
+	}
+
+	// 2b. Push via first-class service (metadata + HTTP push)
+	if v.voucherPushService != nil && v.voucherPushService.Enabled() && voucherFilePath != "" {
+		if err := v.voucherPushService.ProcessVoucher(ctx, serial, model, guidStr, voucherFilePath, didURL); err != nil {
+			fmt.Printf("⚠️  Voucher push service failed: %v\n", err)
 		}
 	}
 

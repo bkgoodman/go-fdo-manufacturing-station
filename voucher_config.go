@@ -67,4 +67,40 @@ type VoucherConfig struct {
 		ExternalCommand string        `yaml:"external_command"`
 		Timeout         time.Duration `yaml:"timeout"`
 	} `yaml:"voucher_upload"`
+
+	VoucherFiles struct {
+		Directory string `yaml:"directory"`
+	} `yaml:"voucher_files"`
+
+	DestinationCallback struct {
+		Enabled         bool          `yaml:"enabled"`
+		ExternalCommand string        `yaml:"external_command"`
+		Timeout         time.Duration `yaml:"timeout"`
+	} `yaml:"destination_callback"`
+
+	PushService struct {
+		Enabled            bool          `yaml:"enabled"`
+		URL                string        `yaml:"url"`
+		AuthToken          string        `yaml:"auth_token"`
+		Mode               string        `yaml:"mode"` // "fallback" or "send_always"
+		RetainFiles        bool          `yaml:"retain_files"`
+		DeleteAfterSuccess bool          `yaml:"delete_after_success"`
+		RetryInterval      time.Duration `yaml:"retry_interval"`
+		MaxAttempts        int           `yaml:"max_attempts"`
+	} `yaml:"push_service"`
+
+	DIDPush struct {
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"did_push"`
+
+	RetryWorker struct {
+		Enabled       bool          `yaml:"enabled"`
+		RetryInterval time.Duration `yaml:"retry_interval"`
+		MaxAttempts   int           `yaml:"max_attempts"`
+	} `yaml:"retry_worker"`
+
+	Retention struct {
+		KeepIndefinitely bool          `yaml:"keep_indefinitely"`
+		PurgeAfter       time.Duration `yaml:"purge_after"`
+	} `yaml:"retention"`
 }

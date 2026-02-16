@@ -92,25 +92,39 @@ fi
 digest_size=$(wc -c < /tmp/digest.bin)
 log "Digest size: $digest_size bytes"
 
-# MOCK HSM SIGNING - Create a fake signature
+# MOCK HSM SIGNING - Create a fake DER-encoded ECDSA signature
 log "MOCK HSM: Simulating digest signing..."
 signing_start=$(date +%s.%N)
 
-# In a real HSM, this would:
-# 1. Load the appropriate private key
-# 2. Sign the digest with the specified hash algorithm
-# 3. Return the signature
+# Deterministically derive r/s values from digest and metadata, then emit ASN.1 DER
+signature_base64=$(python3 - <<'EOF'
+import base64, hashlib, sys, pathlib
 
-# For testing, we'll create a deterministic fake signature
-# based on the digest content and request metadata
-signature_data=$(cat /tmp/digest.bin | sha256sum | cut -d' ' -f1)
-signature_base64=$(echo -n "${signature_data}${request_id}${key_type}" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64 -w 0)
+digest = pathlib.Path('/tmp/digest.bin').read_bytes()
+curve_order = int('ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973', 16)
+
+def derive(tag: bytes) -> int:
+	return int.from_bytes(hashlib.sha512(digest + tag).digest(), 'big') % curve_order or 1
+
+def der_int(value: int) -> bytes:
+	data = value.to_bytes(48, 'big').lstrip(b'\x00') or b'\x00'
+	if data[0] & 0x80:
+		data = b'\x00' + data
+	return bytes((0x02, len(data))) + data
+
+r = derive(b'R')
+s = derive(b'S')
+seq = der_int(r) + der_int(s)
+der = bytes((0x30, len(seq))) + seq
+print(base64.b64encode(der).decode('ascii'))
+EOF
+)
 
 signing_end=$(date +%s.%N)
 signing_duration=$(echo "$signing_end - $signing_start" | bc -l)
 
 log "MOCK HSM: 'Signing' completed in ${signing_duration}s"
-log "MOCK HSM: Generated fake signature for testing"
+log "MOCK HSM: Generated fake DER ECDSA signature for testing"
 
 # Create response
 response=$(cat <<EOF
