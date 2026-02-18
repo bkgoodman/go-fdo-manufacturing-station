@@ -1,5 +1,16 @@
 cred.bin
 fdo-client
 *.log
-go-fdo
 test.db
+fdo-di-client
+voucher-push-receiver
+fdo-manufacturing-station
+advanced-voucher-recipient
+
+# Build artifacts
+fdo-manufacturing-station*
+voucher-push-receiver
+
+# Runtime data
+data/
+*.db
