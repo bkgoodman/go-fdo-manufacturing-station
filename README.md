@@ -130,7 +130,7 @@ Multiple options for handling signed vouchers, supporting different operational 
 - **Error Handling**: Configurable retry and error management
 - **Protocol Flexibility**: HTTP, FTP, custom protocols via script integration
 
-> 📚 See [docs/voucher_transmission.md](docs/voucher_transmission.md) for destination resolution order, retry worker details, and CLI tooling (`--voucher-list`, `--voucher-retransmit-id`, `--voucher-purge-id`).
+> 📚 See [docs/voucher_transmission.md](docs/voucher_transmission.md) for destination resolution order, retry worker details, and CLI tooling (`--voucher-list`, `--voucher-retransmit-id`, `--voucher-purge-id`). For a standalone demo/test endpoint, consult [docs/voucher_push_receiver.md](docs/voucher_push_receiver.md) which explains the helper receiver binary, its CLI flags, and how to use it to validate voucher delivery locally.
 
 ### 📋 **OVEExtra Data Integration**
 

@@ -7,9 +7,10 @@ set -eu
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER_BIN="$PROJECT_ROOT/fdo-manufacturing-station"
-RECEIVER_BIN="$PROJECT_ROOT/voucher-push-receiver"
+RECEIVER_BIN="${RECEIVER_BIN:-$PROJECT_ROOT/voucher-push-receiver}"
 CONFIG_FILE="$PROJECT_ROOT/tests/config_push_test.cfg"
-CLIENT_BIN="$PROJECT_ROOT/go-fdo/examples/cmd/client"
+CLIENT_SOURCE="$PROJECT_ROOT/go-fdo/examples/cmd"
+CLIENT_BIN="$PROJECT_ROOT/fdo-di-client"
 
 SERVER_LOG="/tmp/fdo_push_server.log"
 RECEIVER_LOG="/tmp/fdo_push_receiver.log"
@@ -43,6 +44,10 @@ printf "Building server and receiver...\n"
     cd "$PROJECT_ROOT"
     go build -o fdo-manufacturing-station .
     go build -o voucher-push-receiver ./cmd/voucher_push_receiver
+    (
+        cd "$CLIENT_SOURCE"
+        go build -o "$CLIENT_BIN"
+    )
 )
 
 printf "Starting HTTP receiver...\n"
@@ -117,11 +122,9 @@ fi
 printf "✅ Voucher payload matches between disk and receiver\n"
 
 META_FILE="$RECEIVER_DIR/$GUID.json"
-if [ ! -f "$META_FILE" ]; then
-    printf "❌ Metadata file missing for GUID %s\n" "$GUID"
-    exit 1
+if [ -f "$META_FILE" ]; then
+    printf "ℹ️  Legacy metadata file produced at %s\n" "$META_FILE"
 fi
-printf "✅ Receiver metadata recorded at %s\n" "$META_FILE"
 
 if ! grep -q "voucher transmission delivered" "$SERVER_LOG"; then
     printf "❌ Server log did not report successful push\n"

@@ -1,10 +1,8 @@
-# SPDX-FileCopyrightText: (C) 2026 Dell Technologies
-
-# SPDX-License-Identifier: Apache 2.0
-
-# Author: Brad Goodman
-
 # TODO: Voucher Management Enhancements
+
+Copyright 2026 Dell Technologies
+License: Apache 2.0
+Author: Brad Goodman
 
 ## High Priority
 

@@ -4,6 +4,8 @@
 
 This document outlines the implementation work required to support optional ownership voucher (OV) delivery to FDO clients during Device Initialization (DI), including QR code display capabilities and device-signed voucher support.
 
+This is **only** to support a very special (new) feature in which the voucher is delivered to the device during DI - i.e. for "self-signed" device vouchers and QR-code-based delivery to user. This is more of a brownfield-type capability and not really intended for factories. **Low-Priority**
+
 ## Current State Analysis
 
 ### Protocol Limitations

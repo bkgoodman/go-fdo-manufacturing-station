@@ -5,7 +5,10 @@
 
 # Test script for voucher disk saving feature
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 echo "=== Testing Voucher Disk Saving ==="
 
@@ -15,21 +18,20 @@ SERVER_LOG="/tmp/fdo_disk_save_test.log"
 
 # Cleanup function
 cleanup() {
-    if [ -n "$SERVER_PID" ]; then
+    if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         echo "Cleaning up server (PID: $SERVER_PID)..."
-        kill -9 $SERVER_PID 2>/dev/null || true
-        wait $SERVER_PID 2>/dev/null || true
+        kill -9 "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
     fi
-    # Clean up test directory (comment out to preserve vouchers for inspection)
-    # rm -rf "$TEST_DIR"
-    rm -f "$SERVER_LOG"
 }
 
 # Set trap for cleanup
 trap cleanup EXIT
 
-# Clean up any existing test directory (comment out to preserve existing vouchers)
-# # rm -rf "$TEST_DIR"
+cd "$REPO_ROOT"
+
+# Clean up previous artifacts
+rm -rf "$TEST_DIR" /tmp/fdo_disk_save_test.db "$SERVER_LOG"
 
 echo "Building..."
 go build -o fdo-manufacturing-station .
@@ -52,11 +54,22 @@ echo "✅ Server started (PID: $SERVER_PID)"
 
 # Run client
 echo "Running client..."
-timeout 10s ./go-fdo/examples/cmd/client client -di http://localhost:8080 || true
+pushd go-fdo/examples >/dev/null
+if ! timeout 30s go run ./cmd client -di http://localhost:8080; then
+    echo "❌ Client DI run failed"
+    popd >/dev/null
+    cat "$SERVER_LOG" || true
+    exit 1
+fi
+popd >/dev/null
 
 # Show server log
-echo "Server log:"
-cat "$SERVER_LOG" | tail -30
+if [ -f "$SERVER_LOG" ]; then
+    echo "Server log (last 30 lines):"
+    tail -30 "$SERVER_LOG"
+else
+    echo "⚠️  Server log not found at $SERVER_LOG"
+fi
 
 # Check if voucher was saved to disk
 echo "Checking for saved vouchers..."
@@ -93,24 +106,30 @@ if [ -d "$TEST_DIR" ]; then
         
         # Validate voucher with go-fdo delegate inspectVoucher
         echo "🔍 Validating voucher with go-fdo delegate inspectVoucher..."
-        # Check if voucher can be parsed (look for "Version" in output)
-        if (cd go-fdo/examples && go run ./cmd delegate -db /tmp/fdo_disk_save_test.db inspectVoucher "$first_voucher" 2>&1 | grep -q "Version"); then
+        output=$(cd go-fdo/examples && go run ./cmd delegate -db /tmp/fdo_disk_save_test.db inspectVoucher "$first_voucher" 2>&1 || true)
+        if echo "$output" | grep -q "Version"; then
             echo "✅ Voucher validation passed (go-fdo delegate inspectVoucher)"
             echo "📋 Voucher details:"
-            (cd go-fdo/examples && go run ./cmd delegate -db /tmp/fdo_disk_save_test.db inspectVoucher "$first_voucher" | head -10) || true
+            echo "$output" | head -10
         else
             echo "❌ Voucher validation failed (go-fdo delegate inspectVoucher)"
             echo "Debug output:"
-            (cd go-fdo/examples && go run ./cmd delegate -db /tmp/fdo_disk_save_test.db inspectVoucher "$first_voucher" 2>&1 | head -10) || true
+            echo "$output" | head -20
             exit 1
         fi
         
     else
         echo "❌ No voucher files found in directory"
+        if [ -f "$SERVER_LOG" ]; then
+            echo "Server log:"; tail -50 "$SERVER_LOG"
+        fi
         exit 1
     fi
 else
     echo "❌ Voucher directory was not created"
+    if [ -f "$SERVER_LOG" ]; then
+        echo "Server log:"; tail -50 "$SERVER_LOG"
+    fi
     exit 1
 fi
 

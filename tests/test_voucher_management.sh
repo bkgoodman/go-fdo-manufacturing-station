@@ -6,9 +6,11 @@
 
 # Test runner for voucher management scenarios
 
-set -e
+set -euo pipefail
 
-TEST_DIR="/home/windsurf/go-fdo-di"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 SERVER_LOG="/tmp/fdo_voucher_test.log"
 
 echo "=== Voucher Management Test Runner ==="
@@ -20,7 +22,7 @@ run_server() {
     local test_name=$2
     
     echo "Starting server for $test_name..."
-    cd "$TEST_DIR"
+    cd "$REPO_ROOT"
     
     # Kill any existing server
     pkill -f "fdo-manufacturing-station" || true
@@ -45,10 +47,10 @@ run_server() {
 
 # Function to stop server
 stop_server() {
-    if [ -n "$SERVER_PID" ]; then
+    if [ -n "${SERVER_PID:-}" ]; then
         echo "Stopping server (PID: $SERVER_PID)..."
-        kill -9 $SERVER_PID 2>/dev/null || true
-        wait $SERVER_PID 2>/dev/null || true
+        kill -9 "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
         sleep 1
         echo "✅ Server stopped"
     fi
@@ -59,10 +61,10 @@ run_client() {
     local test_name=$1
     
     echo "Running DI client for $test_name..."
-    cd "$TEST_DIR"
+    cd "$REPO_ROOT"
     
     # Use the go-fdo client example
-    timeout 10s ./go-fdo/examples/cmd/client client -di http://localhost:8080 >/dev/null 2>&1 || true
+    timeout 30s go run ./go-fdo/examples/cmd client -di http://localhost:8080 >/dev/null 2>&1 || true
     
     echo "✅ Client test completed"
 }
@@ -88,7 +90,7 @@ check_output() {
 # Main test execution
 main() {
     echo "Building application..."
-    cd "$TEST_DIR"
+    cd "$REPO_ROOT"
     go build -o fdo-manufacturing-station .
     
     # Test 1: Basic external handler

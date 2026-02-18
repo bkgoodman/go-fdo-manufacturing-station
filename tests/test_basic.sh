@@ -6,7 +6,10 @@
 
 # Basic test for voucher management
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Cleanup function
 cleanup() {
@@ -21,7 +24,7 @@ trap cleanup EXIT
 echo "=== Basic Voucher Management Test ==="
 
 # Setup
-cd /home/windsurf/go-fdo-di
+cd "${REPO_ROOT}"
 rm -f test.db
 rm -f /tmp/fdo_basic_test.log
 
