@@ -265,6 +265,16 @@ A `.fdoov` file is a binary-encoded FDO ownership voucher as defined in [[FDO-Sp
 3. Owner public key
 4. Device attestation data
 
+### PEM Encoding
+
+Implementations SHALL wrap voucher CBOR in a PEM block to ensure interoperability with existing tooling:
+
+- The PEM block type MUST be `OWNERSHIP VOUCHER`, using the literal header/footer strings `-----BEGIN OWNERSHIP VOUCHER-----` and `-----END OWNERSHIP VOUCHER-----`.
+- Base64 output MUST be line-wrapped at 64 characters per line (per [[RFC7468]] Section 2) to avoid extremely long lines and to match the formatting emitted by the `go-fdo` CLI utilities.
+- Files SHOULD terminate with a newline after the footer so downstream parsers that expect text files continue to work.
+
+Voucher payloads MAY still be stored or transmitted as raw CBOR bytes when both parties explicitly agree, but the PEM-wrapped form is REQUIRED for interchange via this specification.
+
 ## Size Constraints
 
 Voucher Recipient implementations SHOULD accept voucher files up to 10 MB. Typical voucher files are expected to be well under 1 MB.

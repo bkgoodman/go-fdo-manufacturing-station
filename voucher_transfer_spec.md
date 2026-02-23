@@ -5,6 +5,7 @@ This document defines the standard protocol for transferring FDO (FIDO Device On
 ## Problem Statement and Scope
 
 ### The Challenge
+
 FDO vouchers need to be securely transferred from manufacturing systems (where devices are provisioned) to owner systems (where devices will be onboarded). Today, this transfer is handled through proprietary, implementation-specific mechanisms that create:
 
 - **Integration Complexity**: Each manufacturer-owner pair requires custom integration work
@@ -17,26 +18,31 @@ FDO vouchers need to be securely transferred from manufacturing systems (where d
 #### Real-World Deployment Scenarios
 
 **Cloud Service Push Model**
+
 - **Scenario**: Manufacturer devices are purchased and immediately need to send vouchers to cloud-based owner services
 - **Requirements**: Real-time delivery, high availability, global accessibility
 - **Challenges**: Network connectivity, service availability, security at scale
 
 **On-Premises Pull Model**
+
 - **Scenario**: Owner systems are in isolated networks (air-gapped, local data centers) without inbound internet access
 - **Requirements**: Secure outbound connections, batch processing, offline operation support
 - **Challenges**: Network restrictions, manual data transfer, synchronization
 
 **Batch Transfer Requirements**
+
 - **Push Batching**: Manufacturing sites may go offline; need to queue vouchers and batch upload when connectivity restored
 - **Pull Batching**: Owner systems may need to retrieve large volumes of vouchers efficiently during maintenance windows
 - **Requirements**: Efficient batching, resume capabilities, progress tracking
 
 **Reconciliation and Recovery**
+
 - **Scenario**: System failures, data corruption, or disaster recovery requiring voucher re-synchronization
 - **Requirements**: Pull-based recovery, duplicate detection, audit trail maintenance
 - **Use Case**: "Give me all vouchers since last checkpoint" for system restoration
 
 **Pagination Requirements**
+
 - **Pull Pagination**: Essential for large datasets - "return first 100 vouchers, then next 100"
 - **Push Pagination**: Less common but needed for bulk uploads or rate-limited environments
 - **Requirements**: Opaque continuation tokens, efficient state management, timeout handling
@@ -44,16 +50,19 @@ FDO vouchers need to be securely transferred from manufacturing systems (where d
 #### Security and Operational Implications
 
 **Security Cannot Be Optional**
+
 - **Problem**: We cannot open voucher endpoints to the internet without authentication and authorization
 - **Risk**: Unauthorized voucher submission, DDoS attacks, data harvesting, manufacturer impersonation
 - **Requirement**: All voucher transfers must be authenticated and authorized regardless of push/pull model
 
 **Voucher-Only Security is Insufficient**
+
 - **Problem**: Relying solely on voucher signature validation puts heavy computational burden on recipients
 - **DDoS Risk**: Attackers can flood systems with invalid vouchers, forcing expensive cryptographic operations
 - **Resource Impact**: High CPU/memory usage, processing bottlenecks, late rejection of invalid requests
 
 **WAF and Edge Security Integration**
+
 - **Requirement**: Security credentials should be usable by Web Application Firewalls and edge security systems
 - **Benefits**: Early rejection of invalid requests, DDoS protection, reduced load on application servers
 - **Implementation**: Tokens and credentials that can be validated at network edge
@@ -61,23 +70,27 @@ FDO vouchers need to be securely transferred from manufacturing systems (where d
 #### Security Approaches
 
 **Explicit Permission Models**
+
 - **Token-Based Authorization**: JWT tokens with scopes, quotas, time limits, device restrictions
 - **Certificate-Based Authentication**: mTLS with manufacturer certificates, CAs, short-lived certs
 - **API Keys**: Simple bearer tokens for basic scenarios
 - **Purchase-Tied Permissions**: Tokens generated during purchase process, tied to orders/customers
 
 **Implicit Trust Models**
+
 - **Voucher Signature Validation**: Cryptographic verification of manufacturer signatures
 - **Shared Key Systems**: Using same keys that sign vouchers for authentication
 - **DID-Based Trust**: Resolving manufacturer identities through DID documents
 - **Reputation Systems**: Trust based on historical manufacturer behavior
 
 **Hybrid Security Strategies**
+
 - **Layered Defense**: Multiple security mechanisms (token + signature + business validation)
 - **Risk-Based Authentication**: Different security levels based on voucher value, manufacturer reputation
 - **Adaptive Security**: Dynamic security requirements based on threat intelligence
 
 ### Protocol Goals
+
 This specification establishes a standardized method for secure voucher transfer that addresses:
 
 1. **Interoperability**: Common API that any FDO-compliant system can implement
@@ -89,53 +102,63 @@ This specification establishes a standardized method for secure voucher transfer
 ### Transfer Models
 
 #### Push Model (Manufacturer-Initiated)
+
 **When to Use**: Real-time voucher delivery as soon as devices are manufactured
 
 **Flow**:
+
 1. Manufacturing system generates voucher during device provisioning
 2. Manufacturing system immediately transfers voucher to owner system
 3. Owner system validates and processes the voucher
 4. Device can be onboarded immediately upon receipt
 
 **Benefits**:
+
 - Minimal latency - vouchers available immediately
 - Simple manufacturer workflow
 - Real-time status of device provisioning
 
 **Challenges**:
+
 - Owner system must be always available to receive vouchers
 - Security considerations for accepting unsolicited voucher submissions
 - Potential DDoS exposure on owner infrastructure
 
 #### Pull Model (Owner-Initiated)
+
 **When to Use**: Batch processing, compliance requirements, or when owner controls timing
 
 **Flow**:
+
 1. Manufacturing system generates and stores vouchers
 2. Owner system polls or subscribes to voucher availability
 3. Owner system retrieves vouchers when ready to process
 4. Owner system controls processing timing and throughput
 
 **Benefits**:
+
 - Owner controls processing timing and resources
 - Better for batch processing and compliance workflows
 - Reduced DDoS exposure on owner systems
 - Supports reconciliation and audit requirements
 
 **Challenges**:
+
 - Increased latency in device availability
 - More complex polling/subscription infrastructure
 - Storage requirements on manufacturing side
 
 #### Hybrid Approaches
+
 **When to Use**: Combining benefits of both models
 
 **Examples**:
+
 - **Push with Pull Fallback**: Primary push delivery with pull capability for missed vouchers
 - **Pull with Notifications**: Pull model with webhook notifications when vouchers are ready
 - **Conditional Transfer**: Push for high-priority devices, pull for bulk processing
 
-## Overview
+## Protocol Overview
 
 The FDO Voucher Transfer Protocol defines standardized HTTP APIs, message formats, security requirements, and operational procedures for both push and pull voucher transfer models. The protocol is designed to support:
 
@@ -291,6 +314,7 @@ The voucher file is a binary-encoded FDO voucher following the FDO specification
 #### Purchase Process Integration
 
 **Token Generation During Purchase**:
+
 1. Customer purchases devices through ordering system
 2. Ordering system generates manufacturer-specific JWT tokens
 3. Tokens include purchase order details, device counts, expiration
@@ -298,6 +322,7 @@ The voucher file is a binary-encoded FDO voucher following the FDO specification
 5. Manufacturer uses tokens for voucher submission
 
 **Purchase-Tied Token Format**:
+
 ```json
 {
   "iss": "https://ordering.example.com",
@@ -319,15 +344,18 @@ The voucher file is a binary-encoded FDO voucher following the FDO specification
 ### Voucher Sequestering
 
 #### Overview
+
 Voucher sequestering holds submitted vouchers in quarantine until additional validation or manual approval is completed.
 
 #### Sequestering Process
+
 1. **Quarantine Reception**: Voucher accepted but held in quarantine
 2. **Additional Validation**: Business logic, order verification, manual review
 3. **Approval Process**: Automatic or manual approval based on risk rules
 4. **Release or Reject**: Approved vouchers released to processing, rejected vouchers deleted
 
 #### Sequestering Configuration
+
 ```yaml
 sequestering:
   enabled: true
@@ -344,6 +372,7 @@ sequestering:
 ```
 
 #### Risk-Based Sequestering
+
 | Risk Level | Auto-Approval | Manual Review | Quarantine Time |
 |------------|---------------|---------------|----------------|
 | **Low** | Yes | No | 1 hour |
@@ -381,24 +410,30 @@ When using DID-based recipient identification, the transfer process includes:
 ## Transfer Protocol Comparison
 
 ### Callback-Based Approach
+
 **Pros**:
+
 - Maximum flexibility for owner systems
 - Supports any protocol or authentication method
 - Easy integration with existing systems
 
 **Cons**:
+
 - Owner must implement and host callback endpoint
 - No standardization across implementations
 - Limited error feedback to manufacturing station
 
 ### First-Class HTTP Service
+
 **Pros**:
+
 - Standardized protocol and error handling
 - Built-in retry and monitoring capabilities
 - Clear contract between manufacturing and owner
 - Better observability and debugging
 
 **Cons**:
+
 - Less flexibility for custom integrations
 - Requires owner to implement specific endpoint
 - Additional implementation complexity
@@ -408,6 +443,7 @@ When using DID-based recipient identification, the transfer process includes:
 ### Threat Model Analysis
 
 **Primary Threats**:
+
 - **Unauthorized Voucher Submission**: Malicious actors sending fraudulent vouchers
 - **Voucher Injection**: Attackers submitting vouchers for devices they don't own
 - **Denial of Service**: Overwhelming recipient systems with invalid vouchers
@@ -421,12 +457,14 @@ When using DID-based recipient identification, the transfer process includes:
 **Overview**: Recipient issues scoped tokens to authorized manufacturers
 
 **DDoS Advantages**:
+
 - **Fast Rejection**: Token validation at edge/WAF before reaching application
 - **Third-Party WAF Support**: Tokens can be validated by CDN/WAF providers
 - **Rate Limiting**: Token-based rate limiting per manufacturer
 - **Resource Efficiency**: Minimal processing for invalid requests
 
 **Token Types**:
+
 - **One-Time Use Tokens**: Single voucher submission, auto-expire after use
 - **Time-Limited Tokens**: Valid for specified duration (e.g., 24 hours, 30 days)
 - **Quota-Limited Tokens**: Maximum number of vouchers allowed
@@ -435,6 +473,7 @@ When using DID-based recipient identification, the transfer process includes:
 - **Purchase-Tied Tokens**: Generated during purchase process, tied to order/customer
 
 **Token Format** (JWT recommended):
+
 ```json
 {
   "iss": "https://recipient.example.com",
@@ -454,6 +493,7 @@ When using DID-based recipient identification, the transfer process includes:
 ```
 
 **Validation Process**:
+
 1. Client includes `Authorization: Bearer <token>` header
 2. Server validates JWT signature and claims
 3. Server enforces token limits and scope
@@ -464,6 +504,7 @@ When using DID-based recipient identification, the transfer process includes:
 **Overview**: Recipient enrolls manufacturer certificates for mutual TLS authentication
 
 **DDoS Considerations**:
+
 - **Medium Resource Usage**: TLS handshake requires CPU but less than voucher parsing
 - **Connection Filtering**: Invalid certificates rejected at TLS layer
 - **Rate Limiting**: Connection-based rate limiting possible
@@ -481,18 +522,21 @@ When using DID-based recipient identification, the transfer process includes:
 | **Third-Party Integration** | Excellent | Poor |
 
 **Enrollment Process**:
+
 1. Manufacturer provides public key or CA certificate to recipient
 2. Recipient adds certificate to trusted manufacturer store
 3. Manufacturer configures client with corresponding private key
 4. All voucher submissions require mTLS handshake
 
 **Certificate Types**:
+
 - **Individual Manufacturer Cert**: Direct certificate for specific manufacturer
 - **Manufacturer CA Cert**: Root CA that can issue manufacturer certificates
 - **Short-Lived Certs**: Certificates with short validity (hours/days)
 - **Device-Specific Certs**: Certificates tied to specific device batches
 
 **Configuration Example**:
+
 ```yaml
 trusted_manufacturers:
   - id: "mfg-abc123"
@@ -519,6 +563,7 @@ trusted_manufacturers:
 **Overview**: Recipient validates voucher signatures against trusted manufacturer keys
 
 **DDoS Implications**:
+
 - **High Resource Usage**: Requires voucher parsing and cryptographic verification
 - **Processing Bottleneck**: Must parse entire voucher before rejection
 - **Memory Pressure**: Large voucher files consume memory
@@ -526,24 +571,28 @@ trusted_manufacturers:
 - **Late Rejection**: Invalid vouchers only rejected after full processing
 
 **Use Cases**:
+
 - **Zero-Trust Environments**: No prior relationship with manufacturer
 - **High-Security**: Cryptographic verification required
 - **Audit Requirements**: Need to verify voucher authenticity
 - **Fallback**: When tokens/certificates unavailable
 
 **Signature Validation Process**:
+
 1. Extract manufacturer signature from voucher
 2. Lookup manufacturer public key from trusted store
 3. Verify cryptographic signature of voucher data
 4. Reject vouchers with invalid or untrusted signatures
 
 **Key Management**:
+
 - **Static Key List**: Pre-configured manufacturer public keys
 - **Dynamic Key Resolution**: Fetch keys from manufacturer DID documents
 - **Key Rotation**: Support for key rollover and multiple active keys
 - **Key Revocation**: Mechanism to revoke compromised keys
 
 **Validation Flow**:
+
 ```yaml
 signature_validation:
   required: true
@@ -569,18 +618,21 @@ signature_validation:
 **Overview**: Application-level validation based on business rules and order data
 
 **DDoS Impact**:
+
 - **Very High Resource Usage**: Database lookups, API calls, complex validation
 - **External Dependencies**: Relies on CRM, order systems, device registries
 - **Processing Time**: Can take seconds per voucher
 - **Cascading Failures**: External service issues affect voucher processing
 
 **Use Cases**:
+
 - **Purchase Integration**: Validate against purchase orders
 - **Customer Verification**: Ensure vouchers for registered customers
 - **Device Registration**: Pre-registered device validation
 - **Compliance**: Regulatory and business rule enforcement
 
 **Validation Types**:
+
 - **Order Number Validation**: Voucher must reference valid purchase order
 - **Device Registration**: Device must be pre-registered in recipient system
 - **Customer Validation**: Voucher must be for registered customer
@@ -588,6 +640,7 @@ signature_validation:
 - **Quantity Limits**: Enforce order quantities and limits
 
 **Integration Points**:
+
 ```yaml
 business_validation:
   order_validation:
@@ -611,19 +664,23 @@ business_validation:
 #### Recommended: Defense-in-Depth Approach
 
 **Layer 1: Transport Security** (Required)
+
 - HTTPS with TLS 1.2+
 - Certificate validation
 - HSTS headers
 
 **Layer 2: Authentication** (Choose one or more)
+
 - Token-based authorization (Model 1)
 - mTLS with manufacturer certificates (Model 2)
 
 **Layer 3: Voucher Integrity** (Required)
+
 - Signature validation (Model 3)
 - Manufacturer key verification
 
 **Layer 4: Business Logic** (Optional but recommended)
+
 - Order validation (Model 4)
 - Device registration checks
 
@@ -641,6 +698,7 @@ business_validation:
 ### Security Implementation Examples
 
 #### Token-Only Configuration
+
 ```yaml
 security:
   authentication:
@@ -656,6 +714,7 @@ security:
 ```
 
 #### mTLS + Signature Configuration
+
 ```yaml
 security:
   authentication:
@@ -675,6 +734,7 @@ security:
 ```
 
 #### Full Defense-in-Depth
+
 ```yaml
 security:
   authentication:
@@ -703,6 +763,7 @@ security:
 ### Security Headers and Response Data
 
 #### Security Headers
+
 ```http
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
@@ -712,6 +773,7 @@ Content-Security-Policy: default-src 'self'
 ```
 
 #### Error Response Security
+
 ```json
 {
   "error": "authentication_failed",
@@ -726,6 +788,7 @@ Content-Security-Policy: default-src 'self'
 ### Security Monitoring and Alerting
 
 #### Security Events to Monitor
+
 - Authentication failures by manufacturer
 - Invalid signature attempts
 - Token usage anomalies
@@ -734,6 +797,7 @@ Content-Security-Policy: default-src 'self'
 - Certificate expiration warnings
 
 #### Alert Thresholds
+
 - >10 authentication failures/hour per manufacturer
 - >5 invalid signature attempts/hour
 - Token usage >90% of quota
@@ -885,7 +949,8 @@ processing:
 
 ## Voucher Retrieval (Pull Model)
 
-### Overview
+### Pull Model Overview
+
 While push-based voucher transfer is the primary model, some use cases require recipients to pull vouchers from manufacturers or centralized voucher repositories.
 
 ### Pull API Specification
@@ -895,6 +960,7 @@ While push-based voucher transfer is the primary model, some use cases require r
 **Purpose**: Retrieve vouchers for a specific customer or manufacturer
 
 **Query Parameters**:
+
 - `customer_id` (string, required): Customer identifier
 - `manufacturer_id` (string, optional): Filter by manufacturer
 - `since` (timestamp, optional): Get vouchers since this time (ISO 8601)
@@ -906,6 +972,7 @@ While push-based voucher transfer is the primary model, some use cases require r
 **Authentication**: Same security models as push (token, mTLS, etc.)
 
 **Response Format**:
+
 ```json
 {
   "vouchers": [
@@ -932,6 +999,7 @@ While push-based voucher transfer is the primary model, some use cases require r
 **Purpose**: Download the actual voucher file
 
 **Response**: Raw `.fdoov` file with appropriate headers:
+
 ```http
 Content-Type: application/x-fdo-voucher
 Content-Disposition: attachment; filename="ABC123.fdoov"
@@ -943,7 +1011,8 @@ X-FDO-Checksum: sha256:abcd1234...
 ### Pagination Strategies
 
 #### Continuation Token Pagination
-**Recommended for large datasets**
+
+Recommended for large datasets.
 
 - **Opaque Tokens**: Server-generated, client passes back unchanged
 - **Stateless**: No server-side session state required
@@ -951,6 +1020,7 @@ X-FDO-Checksum: sha256:abcd1234...
 - **Expiry**: Tokens can expire for security
 
 **Continuation Token Format** (server implementation detail):
+
 ```json
 {
   "position": "timestamp:serial",
@@ -961,14 +1031,16 @@ X-FDO-Checksum: sha256:abcd1234...
 ```
 
 #### Offset-Based Pagination
-**Simple but limited**
+
+Simple but limited.
 
 - **Query Parameters**: `offset=0&limit=100`
 - **Limitations**: Inefficient for large datasets, data consistency issues
 - **Use Case**: Small datasets, simple implementations
 
 #### Cursor-Based Pagination
-**Balance of complexity and functionality**
+
+Balance of complexity and functionality.
 
 - **Cursor**: Based on timestamp or voucher ID
 - **Efficiency**: Better than offset for large datasets
@@ -977,9 +1049,11 @@ X-FDO-Checksum: sha256:abcd1234...
 ### Long-Polling and Streaming
 
 #### Long-Polling Endpoint
-**GET /api/vouchers/subscribe**
+
+`GET /api/vouchers/subscribe`
 
 **Query Parameters**:
+
 - `customer_id` (string, required)
 - `timeout` (integer, optional): Max wait time (default: 30 seconds)
 - `since` (timestamp, optional): Only return vouchers since this time
@@ -987,9 +1061,11 @@ X-FDO-Checksum: sha256:abcd1234...
 **Response**: Returns immediately if vouchers available, waits up to timeout if none
 
 #### Server-Sent Events
-**GET /api/vouchers/stream**
+
+`GET /api/vouchers/stream`
 
 **Response**: SSE stream of voucher availability notifications
+
 ```http
 Content-Type: text/event-stream
 Cache-Control: no-cache
@@ -1005,18 +1081,21 @@ data: {"voucher_id": "uuid-2", "serial": "DEF456"}
 ### Pull Model Security Considerations
 
 #### Authentication and Authorization
+
 - **Same Security Models**: Token, mTLS, signature validation
 - **Customer Scoping**: Only return vouchers for authenticated customer
 - **Rate Limiting**: Prevent excessive polling
 - **Data Minimization**: Only return necessary metadata
 
 #### Data Privacy and Compliance
+
 - **Access Logging**: Log all voucher access attempts
 - **Data Retention**: Clear policies for voucher storage
 - **Audit Trail**: Complete history of voucher downloads
 - **Geographic Restrictions**: Comply with data residency requirements
 
 #### Performance and Scalability
+
 - **Caching**: Cache voucher metadata, not files
 - **CDN Integration**: Use CDN for voucher file downloads
 - **Database Optimization**: Efficient queries for large datasets
@@ -1035,14 +1114,16 @@ data: {"voucher_id": "uuid-2", "serial": "DEF456"}
 | **Scalability** | Recipient-limited | Manufacturer-limited |
 | **Use Cases** | Real-time delivery | Batch processing, compliance |
 
-### Hybrid Approaches
+### Pull-Push Hybrid Approaches
 
 #### Push with Pull Fallback
+
 1. **Primary Push**: Manufacturer pushes vouchers immediately
 2. **Pull Fallback**: Recipient can pull missed vouchers
 3. **Reconciliation**: Periodic sync to ensure completeness
 
 #### Pull with Push Notifications
+
 1. **Webhook Notification**: Manufacturer notifies of voucher availability
 2. **Pull Download**: Recipient pulls voucher when ready
 3. **Queue Management**: Recipient controls processing timing

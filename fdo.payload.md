@@ -1,0 +1,690 @@
+# FDO Service Info Module: fdo.payload
+
+Copyright &copy; 2026 Dell Technologies and FIDO Alliance
+Author: Brad Goodman, Dell Technologies
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+## Overview
+
+**Module Name**: `fdo.payload`  
+**Version**: 1.0  
+**Status**: Draft
+
+## Purpose
+
+The `fdo.payload` FSIM enables owners to deliver payloads that devices MAY actively interpret and apply during onboarding. Unlike `fdo.upload`, whose role is simply to move raw bytes, `fdo.payload` is intended for higher-level content (scripts, declarative configs, manifests) that can be executed or consumed immediately by the target system. By standardizing around well-known MIME types and data formats, the module encourages interoperability: a single payload authored by a service can be understood by diverse device classes without custom tooling.
+
+Common use cases include:
+
+- Shell scripts for system configuration
+- Cloud-init configuration files
+- Ansible playbooks
+- Custom JSON/YAML configuration
+- Binary firmware updates
+- Container images or manifests
+- EFI applications for Bare Metal Orchestration (BMO)
+- Bootable ISO images for OS installation
+
+The device interprets the payload based on the MIME type and applies it according to its implementation. The module supports chunked transfer for large payloads and provides detailed error reporting.
+
+## Relationship to fdo.bmo
+
+**`fdo.payload` and `fdo.bmo` are functionally identical.** Both FSIMs use the same chunking strategy, message formats, acknowledgment gate, and result handling. The *only* difference is practical deployment semantics:
+
+| FSIM | Client Type | Payload Purpose |
+|------|-------------|-----------------|
+| `fdo.payload` | OS/Installer/Application | Scripts, configs, packages to execute/apply |
+| `fdo.bmo` | UEFI firmware | Boot images (EFI, ISO) to chainload |
+
+### Why Separate FSIMs?
+
+The separation leverages **client-side FSIM advertisement as implicit phase detection**:
+
+- A client advertising `fdo.payload` has already booted past the firmware stage and is looking for configuration data
+- A client advertising `fdo.bmo` is still in firmware, looking for an OS installer boot image
+
+This simplifies both client and server implementations:
+
+- **OS/application clients** only implement `fdo.payload` - they don't need boot image handling logic
+- **Firmware clients** only implement `fdo.bmo` - they don't need to parse or handle configuration payloads they would never use
+- **Servers** can determine the client's provisioning phase purely from which FSIMs are advertised, without explicit phase negotiation
+
+### Implementation Note
+
+Because `fdo.payload` and `fdo.bmo` are wire-compatible, implementations MAY:
+
+- Share underlying chunking code between both FSIMs
+- Use a single generic payload delivery library with different FSIM name prefixes
+- Theoretically merge them into a single FSIM (though this loses the phase detection benefit)
+
+The MIME type (`mime_type` in `fdo.payload`, `image_type` in `fdo.bmo`) provides the semantic distinction between configuration payloads and boot images.
+
+## Key-Value Pairs
+
+<!-- markdownlint-disable MD033 -->
+| Key | Direction | Type | Description |
+| --- | --------- | ---- | ----------- |
+| `fdo.payload:active` | Bidirectional | Boolean | Module activation status |
+| `fdo.payload:payload-begin` | Owner → Device | Map | Announces payload transfer (per chunking strategy) |
+| `fdo.payload:payload-ack` | Device → Owner | Array | Accept/reject payload before transfer (when `require_ack` is set) |
+| `fdo.payload:payload-data-<n>` | Owner → Device | Byte string | Payload data chunk `n` (0-based) |
+| `fdo.payload:payload-end` | Owner → Device | Map | Signals completion of payload transfer |
+| `fdo.payload:payload-result` | Device → Owner | Array | Final result with status/message |
+| `fdo.payload:error` | Device → Owner | Object | Error during transfer |
+<!-- markdownlint-enable MD033 -->
+
+## Data Structures
+
+### PayloadBegin
+
+Payload transfers use the generic `payload-begin` map from the chunking strategy. `fdo.payload` reserves the following negative keys for MIME metadata:
+
+    {
+      0: 4096,                      / total_size per chunk spec /
+      1: "sha256",                  / optional hash algorithm /
+      -1: "application/x-sh",       / mime_type (required) /
+      -2: "setup.sh",               / payload name (optional) /
+      -3: {                         / payload metadata (optional) /
+        "description": "Initial setup script"
+      },
+      -4: "1.0"                     / version (optional) /
+    }
+
+#### PayloadBegin Schema Extensions
+
+| Key | Name | Type | Requirement | Description |
+| --- | ---- | ---- | ----------- | ----------- |
+| `-1` | mime_type | tstr | **Required** | MIME type of the payload; devices MUST validate support before accepting data. |
+| `-2` | name | tstr | Optional | Descriptive name for the payload (e.g., filename). |
+| `-3` | metadata | map | Optional | Additional FSIM-defined metadata (description, etc.). |
+| `-4` | version | tstr | Optional | Version string for the payload content. Devices MAY use this to determine whether the payload has already been applied (see [Version-Based Payload Rejection](#version-based-payload-rejection)). |
+
+All non-negative keys remain reserved for the generic chunking fields (`total_size`, `hash_alg`, etc.) as documented in `chunking-strategy.md`.
+
+### PayloadResult
+
+Devices MUST send `fdo.payload:payload-result` after processing the payload. It follows the generic result array shape from the chunking strategy:
+
+    [
+      0,                                / status_code: 0=success, 1=warning, 2=error /
+      "Script executed successfully"     / optional message /
+    ]
+
+| Index | Name | Type | Description |
+| ----- | ---- | ---- | ----------- |
+| 0 | status_code | int | Mandatory status (0=success, 1=warning, 2=error; devices MAY extend with additional values ≥3). |
+| 1 | message | tstr | Optional human-readable status. |
+
+**Status Code Semantics**:
+
+- `status_code = 0` (success): Payload was successfully applied and is usable
+- `status_code = 1` (warning): Payload was applied but with warnings (e.g., partial execution); payload is usable
+- `status_code = 2` (error): Payload was NOT applied; payload is unusable and should not be considered applied
+- `status_code = 3` (session restart): Payload was successfully applied, but the device will terminate the current TO2 session and initiate a new one. This is used when the payload requires the device to restart its FDO client process (e.g., after a client software update). Owners SHOULD expect the TO2 session to end gracefully after receiving this status and SHOULD anticipate a new TO2 session from the updated device. Owners SHOULD NOT treat this as an error.
+
+Owners SHOULD treat `status_code = 2` as a failure and consult `fdo.payload:error` for detailed diagnostics when provided.
+
+### PayloadError
+
+Error during payload transfer or processing.
+
+    {
+      0: 2,
+      1: "Invalid YAML syntax at line 15",
+      2: "expected mapping, found sequence"
+    }
+
+#### PayloadError Schema
+
+    0: code (uint, required)
+    1: message (string, required)
+    2: details (string, optional)
+
+**Fields**:
+
+- `code` (required): Numeric error code (see Error Codes)
+- `message` (required): Human-readable error message
+- `details` (optional): Additional error details
+
+## Error Codes
+
+| Code | Name | Description |
+| ---- | ---- | ----------- |
+| 1 | Unknown MIME Type | Device does not support the specified MIME type |
+| 2 | Invalid Format | Payload format/syntax is invalid |
+| 3 | Invalid Content | Payload content contains invalid parameters or values |
+| 4 | Unable to Apply | Runtime error prevented payload application |
+| 5 | Unsupported Feature | Payload uses features not supported by device |
+| 6 | Transfer Error | Error during data transfer (corruption, timeout) |
+| 7 | Resource Error | Insufficient resources (disk space, memory) |
+
+## Message Details
+
+### fdo.payload:active
+
+**Direction**: Bidirectional
+
+Indicates whether the payload module is active.
+
+**Device → Owner**: Device sends `true` if it supports payload delivery
+**Owner → Device**: Owner may query device support (optional)
+
+### fdo.payload:payload-begin
+
+**Direction**: Owner → Device
+
+Announces a payload transfer by sending the `payload-begin` map described above (generic chunk fields plus MIME metadata).
+
+When the owner sets `require_ack` (key 3) to `true`, the device MUST respond with `payload-ack` before any data chunks are sent. This allows the device to validate the MIME type and other metadata before committing to receive a potentially large transfer.
+
+### fdo.payload:payload-ack
+
+**Direction**: Device → Owner
+
+Accepts or rejects a payload transfer when `require_ack` is set in `payload-begin`. Uses the standard acknowledgment gate format from `chunking-strategy.md`:
+
+```cddl
+PayloadAck = [
+    accepted: bool,        ; true = proceed, false = rejected
+    ? reason_code: uint,   ; Rejection reason (see table below)
+    ? message: tstr        ; Human-readable explanation
+]
+```
+
+**Payload-Specific Reason Codes**:
+
+| Code | Name | Description |
+| ---- | ---- | ----------- |
+| 1 | Unsupported MIME Type | Device does not support this payload type |
+| 2 | Size Exceeded | Payload too large for available resources |
+| 3 | Not Applicable | Payload not relevant to this client/phase |
+| 4 | Policy Violation | Security policy prevents acceptance |
+| 5 | Already Current | Device has already applied this payload version; no update needed (see [Version-Based Payload Rejection](#version-based-payload-rejection)) |
+
+**Example - Rejecting Boot Image in OS Context**:
+
+```text
+Owner → Device: fdo.payload:payload-begin {
+  0: 524288000,
+  3: true,
+  -1: "application/x-iso9660-image",
+  -2: "installer.iso"
+}
+Device → Owner: fdo.payload:payload-ack [false, 3, "Boot images not applicable to OS context"]
+```
+
+**Example - Accepting Configuration Payload**:
+
+```text
+Owner → Device: fdo.payload:payload-begin {
+  0: 4096,
+  3: true,
+  -1: "text/cloud-config"
+}
+Device → Owner: fdo.payload:payload-ack [true]
+Owner → Device: fdo.payload:payload-data-0
+...
+```
+
+**Processing**:
+
+- Owner SHOULD set `require_ack: true` when sending large payloads or payloads that may not apply to all client types
+- Device MUST send `payload-ack` promptly after receiving `payload-begin` with `require_ack: true`
+- Owner MUST NOT send `payload-data-*` chunks until `payload-ack` is received (when `require_ack` is set)
+- If `payload-ack` contains `accepted: false`, owner MUST NOT send any data chunks
+- Owner MAY attempt a different payload (new `payload-begin`) after rejection
+
+### fdo.payload:payload-data-\<n\>
+
+**Direction**: Owner → Device
+
+Sends payload chunk `n` (0-based). Chunks MUST follow the same size guidelines and ordering rules defined in `chunking-strategy.md`. Owners MAY retransmit a chunk by reusing the same index.
+
+### fdo.payload:payload-end
+
+**Direction**: Owner → Device
+
+Signals completion of the payload transfer. Owners SHOULD provide a hash in the `payload-end` map when a `hash_alg` was advertised in `payload-begin`. Devices MUST verify the hash when present before applying the payload.
+
+### fdo.payload:payload-result
+
+**Direction**: Device → Owner
+
+Reports the final status using the result array described earlier. Devices SHOULD include execution output (index 2) when available.
+
+### fdo.payload:error
+
+**Direction**: Device → Owner
+
+Reports an error during transfer or processing.
+
+**CBOR Structure**: PayloadError object
+
+**Processing**:
+
+- Can be sent at any point during transfer
+- Terminates the current payload transfer
+- Owner should not send more data after receiving error
+
+## Common MIME Types
+
+The following MIME types are **non-normative** examples of formats a device MAY choose to recognize; implementations can support any subset or define vendor-specific types as needed.
+
+### Scripts and Executables
+
+- `application/x-sh` - Shell script (bash, sh)
+- `application/x-python` - Python script
+- `application/x-perl` - Perl script
+- `application/x-executable` - Binary executable
+
+### Configuration Formats
+
+- `text/cloud-config` - Cloud-init configuration
+- `application/x-yaml` - YAML configuration
+- `application/json` - JSON configuration
+- `application/toml` - TOML configuration
+- `text/x-ini` - INI configuration
+
+### SSH Keys
+
+- `application/x-ssh-key` - SSH private key (OpenSSH format)
+- `application/x-ssh-public-key` - SSH public key
+- `application/x-openssh-key` - OpenSSH format private key
+- `application/pkcs8` - PKCS#8 private key format
+- `text/plain` - SSH authorized_keys format (for public keys)
+
+### Infrastructure as Code
+
+- `application/x-ansible` - Ansible playbook
+- `application/x-terraform` - Terraform configuration
+- `application/x-dockerfile` - Dockerfile
+
+### Container and Orchestration
+
+- `application/vnd.docker.distribution.manifest.v2+json` - Docker manifest
+- `application/vnd.kubernetes.yaml` - Kubernetes manifest
+
+### OS Package Managers
+
+These MIME types signal that the payload is a native operating-system package and SHOULD be installed via the platform's package manager rather than manually unpacked. Devices advertising support for this category MUST run the corresponding install command (e.g., `apt`, `dnf`, `yum`, `zypper`) or an equivalent transactional package API.
+
+- `application/vnd.debian.binary-package` - Debian-family package (.deb) intended to be installed via `dpkg`/`apt`
+- `application/x-rpm` - RPM package (.rpm) to be installed via `rpm`/`dnf`/`yum`
+- `application/vnd.flatpak.ref` - Flatpak reference file (optional, for desktop-class targets)
+- `application/vnd.snap.package` - Snap package (optional, when snapd is available)
+
+Owners MAY include package metadata in the `payload-begin` map to indicate target repositories or installation flags. Devices SHOULD reject packages whose signatures or repositories are untrusted.
+
+### Boot Images and EFI Applications
+
+These types support Bare Metal Orchestration (BMO) and OS installation scenarios where firmware or BIOS/UEFI receives bootable images via FDO:
+
+- `application/efi` - UEFI executable application (.efi)
+- `application/vnd.efi` - Vendor-specific EFI application
+- `application/x-iso9660-image` - Bootable ISO image (CD/DVD format)
+- `application/x-raw-disk-image` - Raw disk image (dd format)
+- `application/x-qemu-disk` - QEMU disk image (qcow2)
+- `application/vnd.microsoft.wim` - Windows Imaging Format
+- `application/x-pxe` - PXE boot image (network boot)
+- `application/x-ipxe-script` - iPXE boot script
+
+**BMO Use Case**: A BMO (Bare Metal Orchestration) service can use `fdo.payload` to deliver an EFI application or bootable ISO to device firmware, enabling zero-touch OS installation. The firmware runs FDO, receives the boot image, and chainloads into the OS installer.
+
+### Custom Types
+
+Vendors may define custom MIME types using the `application/vnd.` prefix:
+
+- `application/vnd.company.config+json`
+- `application/vnd.vendor.firmware+bin`
+
+## Version-Based Payload Rejection
+
+The optional `version` field (key `-4`) in `payload-begin` enables devices to reject payloads that have already been applied, avoiding redundant processing. This mechanism is useful for any payload type — not just client updates — where the device can determine that a specific version of content is already present.
+
+### Mechanism
+
+When an owner includes `version` in `payload-begin` and sets `require_ack: true`, the device MAY compare the offered version against its own state for that MIME type. If the device determines the payload content at that version has already been applied, it SHOULD reject the payload with reason code 5 ("Already Current"):
+
+```text
+Owner → Device: fdo.payload:payload-begin {
+  0: 102400,
+  3: true,
+  -1: "application/x-rpm",
+  -2: "monitoring-agent-2.1.0.rpm",
+  -4: "2.1.0"
+}
+Device → Owner: fdo.payload:payload-ack [false, 5, "monitoring-agent 2.1.0 already installed"]
+```
+
+Owners SHOULD treat reason code 5 as a successful outcome (the desired state is already achieved) and proceed with subsequent payloads or FSIMs.
+
+### Applicability
+
+Version-based rejection is entirely optional and implementation-specific. Examples of where it applies:
+
+- **OS packages**: Device checks whether the named package at the offered version is already installed
+- **Configuration files**: Device compares a version tag or checksum against what is currently deployed
+- **Client software updates**: Device compares its own version against the offered version (see [Client Update Payloads](#client-update-payloads))
+- **Firmware images**: Device checks its current firmware version
+
+The interpretation of the `version` string is MIME-type-specific and left to the device's payload handler. Devices that do not implement version checking simply ignore the field and accept or reject the payload based on other criteria.
+
+### Idempotency Considerations
+
+Device implementations MUST accurately determine whether a payload version is truly "already current." An incorrect determination that a payload is always new will cause redundant processing on every onboarding attempt. Conversely, an incorrect determination that a payload is already applied may skip a necessary update. When in doubt, devices SHOULD accept the payload.
+
+## Client Update Payloads (Non-Normative)
+
+This section provides guidance for using `fdo.payload` to deliver updates to the FDO client software itself. Because client implementations vary across vendors and platforms, this mechanism relies on vendor-specific MIME types and the existing payload acknowledgment and versioning features described above.
+
+### Motivation
+
+Onboarding services may need to update the FDO client (code and/or configuration) on a device before proceeding with normal onboarding. For example, a fleet management system may require all devices to run a minimum client version before applying security policies or installing workloads.
+
+### Design Principles
+
+- **Vendor-specific MIME types**: Client update payloads use vendor-defined MIME types (e.g., `application/vnd.xyzco.fdo-client-update`) so that only the target client implementation recognizes and accepts them. Other FDO client implementations will NAK the payload with reason code 1 ("Unsupported MIME Type"), which is the correct and expected behavior.
+
+- **Ordering**: Onboarding services SHOULD send client update payloads **before** any other FSIMs or payloads. Since the server controls FSIM ordering, this is an implementation decision for the onboarding service — no protocol-level priority mechanism is needed. This ensures the client is updated before any subsequent onboarding actions that depend on the updated client.
+
+- **Atomicity**: Client update payloads SHOULD be delivered as a **single atomic payload** containing both code and configuration changes. This avoids partial-update states where, for example, new code is installed but old configuration is still active, or vice versa. The internal structure of this atomic bundle is entirely vendor-defined.
+
+- **Version checking**: Owners SHOULD include the `version` field (key `-4`) in `payload-begin` for client update payloads. The client SHOULD compare this against its current version and NAK with reason code 5 ("Already Current") if no update is needed. This is the **critical mechanism** that prevents infinite update-restart loops.
+
+- **Session restart after update**: After successfully applying a client update, the device sends `payload-result` with `status_code = 3` ("Session Restart") and terminates the TO2 session. The updated client then initiates a fresh TO2 session. On the subsequent session, the onboarding service offers the same client update payload, the now-updated client NAKs it as "Already Current," and normal onboarding proceeds.
+
+### Protocol Flow: Client Update Needed
+
+```text
+    Owner (Onboarding Service)          Device (FDO Client v1.0)
+      |                                   |
+      |  payload-begin {                  |
+      |    3: true,                       |
+      |    -1: "application/vnd.xyzco.fdo-client-update",
+      |    -4: "2.0"                      |
+      |  }                                |
+      |---------------------------------->|
+      |                                   | Check: current version is 1.0,
+      |                                   | offered version is 2.0 → accept
+      |  payload-ack [true]               |
+      |<----------------------------------|
+      |                                   |
+      |  payload-data-0..N                |
+      |---------------------------------->|
+      |                                   |
+      |  payload-end                      |
+      |---------------------------------->|
+      |                                   | Apply update atomically
+      |  payload-result [3, "Client updated to 2.0, restarting"]
+      |<----------------------------------|
+      |                                   |
+      |  [TO2 session ends]               |
+      |                                   | [Client restarts as v2.0]
+      |                                   | [New TO2 session begins]
+      |                                   |
+```
+
+### Protocol Flow: Client Already Current
+
+```text
+    Owner (Onboarding Service)          Device (FDO Client v2.0)
+      |                                   |
+      |  payload-begin {                  |
+      |    3: true,                       |
+      |    -1: "application/vnd.xyzco.fdo-client-update",
+      |    -4: "2.0"                      |
+      |  }                                |
+      |---------------------------------->|
+      |                                   | Check: current version is 2.0,
+      |                                   | offered version is 2.0 → already current
+      |  payload-ack [false, 5, "Already at version 2.0"]
+      |<----------------------------------|
+      |                                   |
+      |  [Owner proceeds to next FSIM/payload - normal onboarding continues]
+      |                                   |
+```
+
+### Protocol Flow: Different Client Implementation
+
+```text
+    Owner (Onboarding Service)          Device (Different Vendor Client)
+      |                                   |
+      |  payload-begin {                  |
+      |    3: true,                       |
+      |    -1: "application/vnd.xyzco.fdo-client-update",
+      |    -4: "2.0"                      |
+      |  }                                |
+      |---------------------------------->|
+      |                                   | Check: MIME type not recognized
+      |  payload-ack [false, 1, "Unsupported MIME type"]
+      |<----------------------------------|
+      |                                   |
+      |  [Owner proceeds to next FSIM/payload - normal onboarding continues]
+      |                                   |
+```
+
+### Avoiding Infinite Restart Loops
+
+The combination of version checking and the "Already Current" NAK code prevents infinite loops:
+
+1. **First TO2 session**: Client is at v1.0, server offers v2.0 → client accepts, applies, sends `status_code = 3`, restarts
+2. **Second TO2 session**: Client is now at v2.0, server offers v2.0 → client NAKs with code 5 ("Already Current") → onboarding proceeds
+
+If the client incorrectly determines that every offered payload is new (i.e., never returns "Already Current"), it will enter an infinite restart loop. Client implementations MUST take care to implement accurate version comparison logic.
+
+## Protocol Flow
+
+### Sequence Diagram
+
+    Owner                           Device
+      |                               |
+      | fdo.payload:payload-begin     |
+      |------------------------------>|
+      |                               | Validate MIME type & resources
+      |                               |
+      | fdo.payload:payload-data-0    |
+      |------------------------------>|
+      |                               | Accumulate chunk0
+      |                               |
+      | fdo.payload:payload-data-1    |
+      |------------------------------>|
+      |                               | Accumulate chunk1
+      |                               |
+      | ...                           |
+      |                               |
+      | fdo.payload:payload-end       |
+      |------------------------------>|
+      |                               | Verify hash/size, apply payload
+      | fdo.payload:payload-result    |
+      |<------------------------------|
+
+### Unsupported MIME Type
+
+    Owner → Device: fdo.payload:payload-begin {
+      -1: "application/x-custom"
+    }
+    Device → Owner: fdo.payload:error {
+      0: 1,
+      1: "MIME type not supported"
+    }
+
+## Implementation Requirements
+
+### Device Implementation
+
+**MUST**:
+
+- Implement callback-based payload handling
+- Support at least one MIME type
+- Validate MIME type before accepting payload
+- Accumulate chunks correctly
+- Report detailed errors with appropriate codes
+- Prevent execution of untrusted payloads without validation
+
+**SHOULD**:
+
+- Support common MIME types (shell scripts, cloud-init, JSON)
+- Validate payload syntax before execution
+- Provide meaningful error messages
+- Log payload application for audit purposes
+- Implement size limits to prevent resource exhaustion
+
+**MAY**:
+
+- Support custom MIME types
+- Provide execution output in result
+- Implement payload caching or rollback
+
+### Owner Implementation
+
+**MUST**:
+
+- Specify valid MIME type
+- Send data in manageable chunks
+- Handle errors gracefully
+- Wait for acknowledgments before sending next chunk
+
+**SHOULD**:
+
+- Provide accurate size information
+- Include descriptive metadata
+- Retry on transfer errors
+- Validate payload before sending
+
+## Security Considerations
+
+### Payload Validation
+
+- Devices MUST validate payload syntax before execution
+- Devices SHOULD implement sandboxing for script execution
+- Devices MUST NOT execute payloads from untrusted sources without validation
+- Devices SHOULD verify payload signatures if supported
+
+### Resource Protection
+
+- Devices MUST implement size limits to prevent resource exhaustion
+- Devices SHOULD monitor execution time and terminate runaway processes
+- Devices MUST protect against path traversal and injection attacks
+
+### Error Information
+
+- Error messages SHOULD be informative but not leak sensitive system information
+- Devices SHOULD sanitize error output to prevent information disclosure
+
+### Execution Context
+
+- Scripts SHOULD run with minimal privileges
+- Devices SHOULD implement execution timeouts
+- Devices MUST prevent payloads from modifying critical system files without authorization
+
+## Callback-Based Design
+
+The device implementation delegates all payload processing to application-provided callbacks:
+
+    type PayloadHandler interface {
+        // SupportsMimeType checks if device supports the MIME type
+        SupportsMimeType(mimeType string) bool
+    
+        // BeginPayload prepares to receive a payload
+        BeginPayload(mimeType, name string, size int64, metadata map[string]string) error
+    
+        // ReceiveChunk processes a data chunk
+        ReceiveChunk(data []byte) error
+    
+        // EndPayload finalizes and applies the payload
+        EndPayload() (success bool, message string, output string, err error)
+    
+        // CancelPayload aborts the current transfer
+        CancelPayload() error
+    }
+
+This design:
+
+- Keeps the FSIM OS-agnostic
+- Allows applications to implement custom payload handlers
+- Enables validation and security policies at the application level
+- Supports diverse payload types without modifying the core FSIM
+
+## Example Use Cases
+
+Two representative scenarios illustrate how devices might act on payload content:
+
+### Shell Script Execution
+
+    MIME Type: application/x-sh
+    Payload: h'23212f62696e2f626173680a6563686f2022436f6e6669677572696e67206465766963652e2e2e220a' / "#!/bin/bash\necho \"Configuring device...\"\n" /
+    Result: [0, "Script executed", h'436f6e66...']
+
+### Declarative Configuration (cloud-init)
+
+    MIME Type: text/cloud-config
+    Payload: h'23636c6f75642d636f6e6669670a7061636b616765733a0a20202d206e67696e780a'
+    Result: [0, "Cloud-init applied"]
+
+## Relationship to Other FSIMs
+
+The `fdo.payload` FSIM complements other configuration FSIMs:
+
+- **fdo.sysconfig**: Configures basic system parameters (identity, time, network)
+- **fdo.csr**: Configures certificates (security credentials)
+- **fdo.payload**: Delivers arbitrary configuration payloads (scripts, configs, binaries, SSH keys)
+
+Together, these FSIMs provide comprehensive device onboarding:
+
+1. Basic system configuration (fdo.sysconfig)
+2. Security credentials (fdo.csr)
+3. Advanced configuration (fdo.payload)
+
+## Design Rationale
+
+### Why MIME Types?
+
+- Industry-standard content type identification
+- Extensible without protocol changes
+- Clear contract between owner and device
+- Supports custom vendor types
+
+### Why Chunked Transfer?
+
+- Supports large payloads (cloud-init configs can be >1MB)
+- Allows progress tracking
+- Enables error recovery
+- Reduces memory requirements
+
+### Why Detailed Error Codes?
+
+- Helps owners diagnose configuration issues
+- Enables automated error handling
+- Improves user experience
+- Facilitates debugging
+
+### Why Callback-Based?
+
+- Maintains OS-agnostic design
+- Allows application-level security policies
+- Supports diverse payload types
+- Enables custom validation logic
+
+## Future Extensions
+
+Potential future enhancements (informative, not normative):
+
+- Payload signatures for verification
+- Compression support
+- Multi-part payloads
+- Payload dependencies
+- Rollback support
+- Dry-run/validation mode
+
+These may be standardized in future revisions based on implementation experience.

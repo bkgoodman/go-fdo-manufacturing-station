@@ -6,11 +6,10 @@ package main
 
 import (
 	"crypto/rand"
-	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/cbor"
@@ -69,23 +68,13 @@ func formatVoucherForDisk(ov *fdo.Voucher) (string, error) {
 		return "", fmt.Errorf("failed to marshal voucher: %w", err)
 	}
 
-	// Base64 encode the CBOR (without line breaks)
-	voucherBase64 := base64.StdEncoding.EncodeToString(voucherBytes)
+	block := &pem.Block{Type: "OWNERSHIP VOUCHER", Bytes: voucherBytes}
+	encoded := pem.EncodeToMemory(block)
+	if encoded == nil {
+		return "", fmt.Errorf("failed to encode voucher PEM block")
+	}
 
-	// Create the formatted output like go-fdo tools
-	var builder strings.Builder
-
-	// Header
-	builder.WriteString("-----BEGIN OWNERSHIP VOUCHER-----\n")
-
-	// Base64-encoded CBOR data
-	builder.WriteString(voucherBase64)
-	builder.WriteString("\n")
-
-	// Footer
-	builder.WriteString("-----END OWNERSHIP VOUCHER-----\n")
-
-	return builder.String(), nil
+	return string(encoded), nil
 }
 
 // GenerateTestVoucher creates a test voucher for testing purposes
