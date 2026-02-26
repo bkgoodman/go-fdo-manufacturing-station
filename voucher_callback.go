@@ -10,11 +10,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 
 	"github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/custom"
+	"github.com/fido-device-onboard/go-fdo/did"
 )
 
 // VoucherCallbackService handles voucher-related callbacks
@@ -276,23 +276,5 @@ func (v *VoucherCallbackService) getDeviceInfo(ctx context.Context, sessionState
 
 // parseStaticPublicKey parses a PEM-encoded public key string into a crypto.PublicKey
 func parseStaticPublicKey(pemKey string) (crypto.PublicKey, error) {
-	block, _ := pem.Decode([]byte(pemKey))
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
-	}
-
-	// Try to parse as different key types
-	if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
-		return key, nil
-	}
-
-	if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
-		return cert.PublicKey, nil
-	}
-
-	if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
-		return key, nil
-	}
-
-	return nil, fmt.Errorf("unsupported public key format")
+	return did.LoadPublicKeyPEM([]byte(pemKey))
 }

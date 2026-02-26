@@ -6,10 +6,10 @@ package main
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
+
+	"github.com/fido-device-onboard/go-fdo/did"
 )
 
 // OwnerKeyResponse is the expected JSON response from owner key service
@@ -70,7 +70,7 @@ func (o *OwnerKeyService) GetOwnerKey(ctx context.Context, serial, model string)
 		return nil, fmt.Errorf("no owner key returned")
 	}
 
-	publicKey, err := parsePublicKeyFromPEM([]byte(response.OwnerKeyPEM))
+	publicKey, err := did.LoadPublicKeyPEM([]byte(response.OwnerKeyPEM))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse PEM key: %w", err)
 	}
@@ -84,7 +84,7 @@ func (o *OwnerKeyService) GetOwnerKey(ctx context.Context, serial, model string)
 // handleDIDResponse handles a DID response from the callback
 func (o *OwnerKeyService) handleDIDResponse(ctx context.Context, didURI string) (*OwnerKeyResult, error) {
 	// Create a DID resolver (without caching for dynamic callbacks)
-	resolver := NewDIDResolver(nil, &DIDCache{Enabled: false})
+	resolver := NewDIDResolver(nil, nil)
 
 	publicKey, didURL, err := resolver.ResolveDIDKey(ctx, didURI)
 	if err != nil {
@@ -95,43 +95,4 @@ func (o *OwnerKeyService) handleDIDResponse(ctx context.Context, didURI string) 
 		PublicKey: publicKey,
 		DIDURL:    didURL,
 	}, nil
-}
-
-// parsePublicKeyFromPEM parses a public key from PEM format
-func parsePublicKeyFromPEM(data []byte) (any, error) {
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
-	}
-
-	// Try to parse as PKIX public key
-	if block.Type == "PUBLIC KEY" {
-		return parsePKIXPublicKey(block.Bytes)
-	}
-
-	// Try to parse as certificate
-	if block.Type == "CERTIFICATE" {
-		return parseCertificatePublicKey(block.Bytes)
-	}
-
-	return nil, fmt.Errorf("unsupported PEM block type: %s", block.Type)
-}
-
-// parsePKIXPublicKey parses a PKIX public key
-func parsePKIXPublicKey(data []byte) (any, error) {
-	// Use x509.ParsePKIXPublicKey to parse the key
-	pubKey, err := x509.ParsePKIXPublicKey(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse PKIX public key: %w", err)
-	}
-	return pubKey, nil
-}
-
-// parseCertificatePublicKey parses a public key from a certificate
-func parseCertificatePublicKey(data []byte) (any, error) {
-	cert, err := x509.ParseCertificate(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate: %w", err)
-	}
-	return cert.PublicKey, nil
 }

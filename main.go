@@ -132,7 +132,7 @@ func runVoucherRetransmit(ctx context.Context, state *sqlite.DB, store *VoucherT
 	callbackExecutor := NewExternalCommandExecutor(config.VoucherManagement.DestinationCallback.ExternalCommand, config.VoucherManagement.DestinationCallback.Timeout)
 	var didResolver *DIDResolver
 	if config.VoucherManagement.DIDCache.Enabled {
-		didResolver = NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+		didResolver = NewDIDResolver(state.DB(), &config.VoucherManagement.DIDCache)
 	}
 	destinationResolver := NewVoucherDestinationResolver(&config.VoucherManagement, callbackExecutor, didResolver)
 	pushClient := NewVoucherPushClient()
@@ -347,7 +347,7 @@ func runManufacturingStation(ctx context.Context) error {
 	// Initialize DID cache if enabled
 	if config.VoucherManagement.DIDCache.Enabled {
 		fmt.Println("Initializing DID cache...")
-		didResolver := NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+		didResolver := NewDIDResolver(state.DB(), &config.VoucherManagement.DIDCache)
 		if err := didResolver.InitializeCache(context.Background()); err != nil {
 			return fmt.Errorf("error initializing DID cache: %w", err)
 		}
@@ -522,7 +522,7 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 	callbackExecutor := NewExternalCommandExecutor(config.VoucherManagement.DestinationCallback.ExternalCommand, config.VoucherManagement.DestinationCallback.Timeout)
 	var didResolver *DIDResolver
 	if config.VoucherManagement.DIDCache.Enabled {
-		didResolver = NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+		didResolver = NewDIDResolver(state.DB(), &config.VoucherManagement.DIDCache)
 	}
 	destinationResolver := NewVoucherDestinationResolver(&config.VoucherManagement, callbackExecutor, didResolver)
 	voucherPushClient := NewVoucherPushClient()
@@ -797,7 +797,7 @@ func handleDIDCachePurge() error {
 	defer state.Close()
 
 	// Create DID resolver
-	resolver := NewDIDResolver(state, &config.VoucherManagement.DIDCache)
+	resolver := NewDIDResolver(state.DB(), &config.VoucherManagement.DIDCache)
 
 	// Initialize cache table
 	ctx := context.Background()

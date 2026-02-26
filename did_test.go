@@ -6,286 +6,324 @@ package main
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/nuts-foundation/go-did/did"
+	"github.com/fido-device-onboard/go-fdo/did"
 )
 
-// TestDIDResolver extends DIDResolver with test-specific functionality
-type TestDIDResolver struct {
-	*DIDResolver
-	testMode bool
-}
-
-// NewTestDIDResolver creates a DID resolver with test capabilities
-func NewTestDIDResolver(sessionState interface{}, config *DIDCache, testMode bool) *TestDIDResolver {
-	return &TestDIDResolver{
-		DIDResolver: NewDIDResolver(sessionState, config),
-		testMode:    testMode,
-	}
-}
-
-// ResolveDIDKey resolves a DID URI with test-specific methods
-func (r *TestDIDResolver) ResolveDIDKey(ctx context.Context, didURI string) (crypto.PublicKey, string, error) {
-	// Handle test-specific did:file method
-	if r.testMode && strings.HasPrefix(didURI, "did:file:") {
-		return r.resolveDIDFile(ctx, didURI)
-	}
-
-	// Handle mock did:key for testing
-	if r.testMode && strings.HasPrefix(didURI, "did:key:") {
-		return r.resolveMockDIDKey(ctx, didURI)
-	}
-
-	// Fall back to regular resolution
-	return r.DIDResolver.ResolveDIDKey(ctx, didURI)
-}
-
-// resolveDIDFile resolves did:file:/path/to/document.json (test only)
-func (r *TestDIDResolver) resolveDIDFile(ctx context.Context, didURI string) (crypto.PublicKey, string, error) {
-	// Extract filename: did:file:filename.json
-	filename := strings.TrimPrefix(didURI, "did:file:")
-	if filename == "" {
-		return nil, "", fmt.Errorf("did:file requires filename: %s", didURI)
-	}
-
-	// Always look in examples directory
-	filePath := filepath.Join("examples", filename)
-
-	// Read the DID document from file
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", fmt.Errorf("DID file not found (404): %s", filePath)
-		}
-		return nil, "", fmt.Errorf("failed to read DID file: %w", err)
-	}
-
-	// Parse the DID document
-	doc, err := did.ParseDocument(string(data))
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to parse DID document: %w", err)
-	}
-
-	// Extract public key
-	publicKey, err := r.extractPublicKey(doc)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to extract public key: %w", err)
-	}
-
-	// Extract DID URL - pass the original DID URI to help with file resolution
-	didURL := r.extractDIDURLWithOriginalDID(doc, didURI)
-
-	return publicKey, didURL, nil
-}
-
-// extractDIDURLWithOriginalDID extracts voucherRecipientURL using original DID URI
-func (r *TestDIDResolver) extractDIDURLWithOriginalDID(doc *did.Document, originalDID string) string {
-	// For did:file resolution, we need to re-read the raw JSON to get extensions
-	// because the go-did library may not preserve custom properties
-
-	if !strings.HasPrefix(originalDID, "did:file:") {
-		return ""
-	}
-
-	// Extract filename from did:file:filename.json
-	filename := strings.TrimPrefix(originalDID, "did:file:")
-	if filename == "" {
-		return ""
-	}
-
-	// Read the original file to get raw JSON with extensions
-	filePath := filepath.Join("examples", filename)
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
-
-	// Parse the raw JSON to extract FDO extension
-	var docMap map[string]interface{}
-	if err := json.Unmarshal(data, &docMap); err != nil {
-		return ""
-	}
-
-	// Look for fido-device-onboarding extension
-	if fdoExt, ok := docMap["fido-device-onboarding"].(map[string]interface{}); ok {
-		if voucherURL, ok := fdoExt["voucherRecipientURL"].(string); ok {
-			return voucherURL
-		}
-	}
-
-	return ""
-}
-
-// resolveMockDIDKey resolves did:key with mock implementation (test only)
-func (r *TestDIDResolver) resolveMockDIDKey(ctx context.Context, didURI string) (crypto.PublicKey, string, error) {
-	// For testing, we'll generate a deterministic key based on the DID
-	// This avoids needing multicodec parsing libraries
-
-	// Use a simple approach: generate a key for testing
-	// In a real implementation, you'd parse the multicodec from the DID
-
-	// Generate a test P-256 key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to generate test key: %w", err)
-	}
-
-	// did:key doesn't have voucherRecipientURL
-	return privateKey.Public(), "", nil
-}
-
-// GenerateTestDIDKey generates a test did:key URI with a real key
-func GenerateTestDIDKey() (string, crypto.PublicKey, error) {
-	// Generate a real P-256 key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// For testing, we'll use a mock did:key format
-	// In reality, did:key contains multicodec-encoded public key
-	pubKey := privateKey.Public()
-	didURI := "did:key:test-" + fmt.Sprintf("%x", pubKey.(*ecdsa.PublicKey).X)[:16]
-
-	return didURI, pubKey, nil
-}
-
-// CreateTestDIDDocument creates a test DID document with FDO extension
-func CreateTestDIDDocument(publicKey crypto.PublicKey, voucherURL string) (string, error) {
-	// Convert public key to JWK format (simplified)
-	jwk := map[string]interface{}{
-		"crv": "P-256",
-		"kty": "EC",
-		"x":   "mock_x_value",
-		"y":   "mock_y_value",
-	}
-
-	// Create DID document
-	doc := map[string]interface{}{
-		"@context": []string{"https://www.w3.org/ns/did/v1"},
-		"id":       "did:web:localhost:8080:test",
-		"verificationMethod": []map[string]interface{}{
-			{
-				"id":           "#key-1",
-				"type":         "JsonWebKey2020",
-				"controller":   "did:web:localhost:8080:test",
-				"publicKeyJwk": jwk,
-			},
-		},
-	}
-
-	// Add FDO extension if voucher URL provided
-	if voucherURL != "" {
-		doc["fido-device-onboarding"] = map[string]interface{}{
-			"voucherRecipientURL": voucherURL,
-		}
-	}
-
-	// Marshal to JSON
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return "", err
-	}
-
-	return string(data), nil
-}
-
-// SaveTestDIDDocument saves a test DID document to a file
-func SaveTestDIDDocument(filePath string, publicKey crypto.PublicKey, voucherURL string) error {
-	docJSON, err := CreateTestDIDDocument(publicKey, voucherURL)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filePath, []byte(docJSON), 0644)
-}
-
-// TestDIDIntegration tests DID resolution and voucher integration
-func TestDIDIntegration(t *testing.T) {
-	// Create test resolver
-	resolver := NewTestDIDResolver(nil, &DIDCache{Enabled: false}, true)
-
+// TestDIDKeyResolution tests did:key resolution using the library's ParseDIDKey.
+func TestDIDKeyResolution(t *testing.T) {
 	ctx := context.Background()
 
-	// Test 1: Mock did:key resolution
-	t.Run("MockDIDKey", func(t *testing.T) {
-		didURI := "did:key:test-12345"
-		publicKey, didURL, err := resolver.ResolveDIDKey(ctx, didURI)
+	t.Run("P256", func(t *testing.T) {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
-			t.Fatalf("Failed to resolve mock did:key: %v", err)
+			t.Fatal(err)
 		}
 
-		if publicKey == nil {
-			t.Fatal("Expected public key, got nil")
+		didURI := testECPublicKeyToDIDKey(t, &key.PublicKey)
+		t.Logf("did:key URI: %s", didURI)
+
+		resolver := NewDIDResolver(nil, nil)
+		pubKey, voucherURL, err := resolver.ResolveDIDKey(ctx, didURI)
+		if err != nil {
+			t.Fatalf("ResolveDIDKey failed: %v", err)
+		}
+		if pubKey == nil {
+			t.Fatal("expected non-nil public key")
+		}
+		if voucherURL != "" {
+			t.Errorf("did:key should have no voucher URL, got %q", voucherURL)
 		}
 
-		if didURL != "" {
-			t.Errorf("Expected empty DID URL for did:key, got: %s", didURL)
+		// Verify the key matches
+		ecPub, ok := pubKey.(*ecdsa.PublicKey)
+		if !ok {
+			t.Fatalf("expected *ecdsa.PublicKey, got %T", pubKey)
 		}
-
-		t.Logf("✅ Mock did:key resolution successful")
+		if ecPub.X.Cmp(key.X) != 0 || ecPub.Y.Cmp(key.Y) != 0 {
+			t.Error("resolved key does not match original")
+		}
 	})
 
-	// Test 2: did:file resolution
-	t.Run("DIDFile", func(t *testing.T) {
-		// Test with existing example file
-		didURI := "did:file:did_owner.json"
-		publicKey, didURL, err := resolver.ResolveDIDKey(ctx, didURI)
+	t.Run("P384", func(t *testing.T) {
+		key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 		if err != nil {
-			t.Fatalf("Failed to resolve did:file: %v", err)
+			t.Fatal(err)
 		}
 
-		if publicKey == nil {
-			t.Fatal("Expected public key, got nil")
-		}
+		didURI := testECPublicKeyToDIDKey(t, &key.PublicKey)
+		t.Logf("did:key URI: %s", didURI)
 
-		expectedURL := "https://example.com/vouchers/owner"
-		if didURL != expectedURL {
-			t.Errorf("Expected voucher URL %s, got: '%s'", expectedURL, didURL)
-			t.Logf("Debug: DID URL was empty or incorrect")
-		} else {
-			t.Logf("✅ DID URL correctly extracted: %s", didURL)
+		resolver := NewDIDResolver(nil, nil)
+		pubKey, _, err := resolver.ResolveDIDKey(ctx, didURI)
+		if err != nil {
+			t.Fatalf("ResolveDIDKey failed: %v", err)
 		}
-
-		t.Logf("✅ did:file resolution successful")
+		ecPub, ok := pubKey.(*ecdsa.PublicKey)
+		if !ok {
+			t.Fatalf("expected *ecdsa.PublicKey, got %T", pubKey)
+		}
+		if ecPub.X.Cmp(key.X) != 0 || ecPub.Y.Cmp(key.Y) != 0 {
+			t.Error("resolved key does not match original")
+		}
 	})
 
-	// Test 3: File not found
-	t.Run("FileNotFound", func(t *testing.T) {
-		didURI := "did:file:nonexistent.json"
-		_, _, err := resolver.ResolveDIDKey(ctx, didURI)
+	t.Run("InvalidDIDKey", func(t *testing.T) {
+		resolver := NewDIDResolver(nil, nil)
+		_, _, err := resolver.ResolveDIDKey(ctx, "did:key:zInvalid")
 		if err == nil {
-			t.Fatal("Expected error for non-existent file")
+			t.Fatal("expected error for invalid did:key")
 		}
-
-		if !strings.Contains(err.Error(), "not found") {
-			t.Errorf("Expected 'not found' error, got: %v", err)
-		}
-
-		t.Logf("✅ File not found handling successful")
 	})
 }
 
-// TestDIDCaching tests DID caching behavior
-func TestDIDCaching(t *testing.T) {
-	// This would test the caching functionality
-	// For now, we'll just create a placeholder
-	t.Log("📋 DID caching tests not yet implemented")
+// TestDIDWebResolution tests did:web resolution via a local httptest server.
+func TestDIDWebResolution(t *testing.T) {
+	ctx := context.Background()
+
+	// Generate a test key
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	voucherRecipientURL := "https://owner.example.com/api/v1/vouchers"
+
+	t.Run("WithVoucherRecipient", func(t *testing.T) {
+		// Create a DID document using the library
+		doc, err := did.NewDocument("did:web:localhost", key.Public(), voucherRecipientURL, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		docJSON, err := doc.JSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Serve it via httptest
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/.well-known/did.json" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/did+ld+json")
+			if _, err := w.Write(docJSON); err != nil {
+				t.Logf("write error: %v", err)
+			}
+		}))
+		defer srv.Close()
+
+		// Extract host:port from server URL (e.g., "127.0.0.1:12345")
+		host := strings.TrimPrefix(srv.URL, "http://")
+
+		// Build did:web URI — colons in host must be percent-encoded
+		didURI := did.WebDID(host, "")
+		t.Logf("did:web URI: %s (server: %s)", didURI, srv.URL)
+
+		// Override the document ID to match the did:web URI the resolver expects
+		doc.ID = didURI
+		doc.VerificationMethod[0].Controller = didURI
+		doc.VerificationMethod[0].ID = didURI + "#key-1"
+		doc.Authentication = []string{didURI + "#key-1"}
+		doc.AssertionMethod = []string{didURI + "#key-1"}
+		if len(doc.Service) > 0 {
+			doc.Service[0].ID = didURI + "#voucher-recipient"
+		}
+		docJSON, _ = doc.JSON()
+
+		// Re-serve with updated doc
+		srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/.well-known/did.json" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/did+ld+json")
+			if _, err := w.Write(docJSON); err != nil {
+				t.Logf("write error: %v", err)
+			}
+		})
+
+		resolver := NewDIDResolver(nil, nil)
+		resolver.SetInsecureHTTP(true)
+
+		pubKey, resolvedURL, err := resolver.ResolveDIDKey(ctx, didURI)
+		if err != nil {
+			t.Fatalf("ResolveDIDKey failed: %v", err)
+		}
+		if pubKey == nil {
+			t.Fatal("expected non-nil public key")
+		}
+
+		// Verify key matches
+		ecPub, ok := pubKey.(*ecdsa.PublicKey)
+		if !ok {
+			t.Fatalf("expected *ecdsa.PublicKey, got %T", pubKey)
+		}
+		if ecPub.X.Cmp(key.X) != 0 || ecPub.Y.Cmp(key.Y) != 0 {
+			t.Error("resolved key does not match original")
+		}
+
+		if resolvedURL != voucherRecipientURL {
+			t.Errorf("expected voucher recipient URL %q, got %q", voucherRecipientURL, resolvedURL)
+		}
+	})
+
+	t.Run("NoVoucherRecipient", func(t *testing.T) {
+		// DID document without service endpoints
+		doc, err := did.NewDocument("did:web:localhost", key.Public(), "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Update the doc ID to match the resolver's expected DID
+			host := strings.TrimPrefix("http://"+r.Host, "http://")
+			docURI := did.WebDID(host, "")
+			doc.ID = docURI
+			doc.VerificationMethod[0].Controller = docURI
+			doc.VerificationMethod[0].ID = docURI + "#key-1"
+			doc.Authentication = []string{docURI + "#key-1"}
+			doc.AssertionMethod = []string{docURI + "#key-1"}
+
+			docJSON, _ := doc.JSON()
+			w.Header().Set("Content-Type", "application/did+ld+json")
+			if _, err := w.Write(docJSON); err != nil {
+				return
+			}
+		}))
+		defer srv.Close()
+
+		host := strings.TrimPrefix(srv.URL, "http://")
+		didURI := did.WebDID(host, "")
+
+		resolver := NewDIDResolver(nil, nil)
+		resolver.SetInsecureHTTP(true)
+
+		pubKey, resolvedURL, err := resolver.ResolveDIDKey(ctx, didURI)
+		if err != nil {
+			t.Fatalf("ResolveDIDKey failed: %v", err)
+		}
+		if pubKey == nil {
+			t.Fatal("expected non-nil public key")
+		}
+		if resolvedURL != "" {
+			t.Errorf("expected empty voucher URL, got %q", resolvedURL)
+		}
+	})
+
+	t.Run("ServerError", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		host := strings.TrimPrefix(srv.URL, "http://")
+		didURI := did.WebDID(host, "")
+
+		resolver := NewDIDResolver(nil, nil)
+		resolver.SetInsecureHTTP(true)
+
+		_, _, err := resolver.ResolveDIDKey(ctx, didURI)
+		if err == nil {
+			t.Fatal("expected error for 500 response")
+		}
+	})
+}
+
+// TestDIDUnsupportedMethod tests that unsupported DID methods return an error.
+func TestDIDUnsupportedMethod(t *testing.T) {
+	resolver := NewDIDResolver(nil, nil)
+	_, _, err := resolver.ResolveDIDKey(context.Background(), "did:example:123")
+	if err == nil {
+		t.Fatal("expected error for unsupported DID method")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Errorf("expected 'unsupported' in error, got: %v", err)
+	}
+}
+
+// TestDIDDisabledResolution tests that resolution returns an error when disabled.
+func TestDIDDisabledResolution(t *testing.T) {
+	resolver := NewDIDResolver(nil, &DIDCache{Enabled: false})
+	_, _, err := resolver.ResolveDIDKey(context.Background(), "did:key:z123")
+	if err == nil {
+		t.Fatal("expected error when DID resolution is disabled")
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Errorf("expected 'disabled' in error, got: %v", err)
+	}
 }
 
 // TestDIDIntegrationWithVoucher tests end-to-end DID integration with vouchers
 func TestDIDIntegrationWithVoucher(t *testing.T) {
-	// This would test the full voucher flow
-	// For now, we'll just create a placeholder
-	t.Log("📋 DID voucher integration tests not yet implemented")
+	t.Log("DID voucher integration tests not yet implemented")
+}
+
+// --- test helpers ---
+
+// testECPublicKeyToDIDKey encodes an ECDSA public key as a did:key URI.
+func testECPublicKeyToDIDKey(t *testing.T, pub *ecdsa.PublicKey) string {
+	t.Helper()
+
+	var prefix []byte
+	switch pub.Curve {
+	case elliptic.P256():
+		prefix = []byte{0x80, 0x24}
+	case elliptic.P384():
+		prefix = []byte{0x81, 0x24}
+	default:
+		t.Fatalf("unsupported curve: %v", pub.Curve.Params().Name)
+	}
+
+	// Compress the point (SEC1 format)
+	byteLen := (pub.Curve.Params().BitSize + 7) / 8
+	xBytes := pub.X.Bytes()
+	compressed := make([]byte, 1+byteLen)
+	if pub.Y.Bit(0) == 0 {
+		compressed[0] = 0x02
+	} else {
+		compressed[0] = 0x03
+	}
+	copy(compressed[1+byteLen-len(xBytes):], xBytes)
+
+	data := append(prefix, compressed...)
+	encoded := testEncodeBase58BTC(data)
+	return "did:key:z" + encoded
+}
+
+// testEncodeBase58BTC encodes bytes as base58-btc (Bitcoin alphabet).
+func testEncodeBase58BTC(data []byte) string {
+	const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+	x := new(big.Int).SetBytes(data)
+	base := big.NewInt(58)
+	zero := big.NewInt(0)
+	mod := new(big.Int)
+
+	var result []byte
+	for x.Cmp(zero) > 0 {
+		x.DivMod(x, base, mod)
+		result = append(result, alphabet[mod.Int64()])
+	}
+
+	for _, b := range data {
+		if b != 0 {
+			break
+		}
+		result = append(result, '1')
+	}
+
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+
+	return string(result)
 }
