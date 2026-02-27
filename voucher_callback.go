@@ -11,6 +11,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
+	"log/slog"
 
 	"github.com/fido-device-onboard/go-fdo"
 	"github.com/fido-device-onboard/go-fdo/custom"
@@ -60,27 +61,22 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 	// Get device info from session state
 	serial, model, _ := v.getDeviceInfo(ctx, sessionState, ov)
 
-	fmt.Printf("🔍 DEBUG: BeforeVoucherPersist called!\n")
-	fmt.Printf("🔍 DEBUG: SessionState type: %T\n", sessionState)
-	fmt.Printf("🔍 DEBUG: Voucher GUID: %x\n", ov.Header.Val.GUID[:])
-	fmt.Printf("🔍 DEBUG: Voucher DeviceInfo: %s\n", ov.Header.Val.DeviceInfo)
+	slog.Debug("BeforeVoucherPersist called",
+		"guid", fmt.Sprintf("%x", ov.Header.Val.GUID[:]),
+		"device_info", ov.Header.Val.DeviceInfo)
 
 	// Attempt to get device info from session state
-	fmt.Printf("🔍 DEBUG: Attempting to get device info from session state...\n")
 	if deviceSelfInfoStore, ok := sessionState.(interface {
 		DeviceSelfInfo(context.Context) (*custom.DeviceMfgInfo, error)
 	}); ok {
-		fmt.Printf("🔍 DEBUG: Session state supports DeviceSelfInfo interface\n")
 		devInfo, err := deviceSelfInfoStore.DeviceSelfInfo(ctx)
 		if err == nil {
-			fmt.Printf("🔍 DEBUG: Got device info from session: serial=%s, deviceInfo=%s\n", devInfo.SerialNumber, devInfo.DeviceInfo)
+			slog.Debug("got device info from session", "serial", devInfo.SerialNumber, "device_info", devInfo.DeviceInfo)
 			serial = devInfo.SerialNumber
 			model = devInfo.DeviceInfo
 		} else {
-			fmt.Printf("🔍 DEBUG: Error getting device info from session: %v\n", err)
+			slog.Debug("error getting device info from session", "error", err)
 		}
-	} else {
-		fmt.Printf("🔍 DEBUG: Session state does NOT support DeviceSelfInfo interface\n")
 	}
 
 	// Use GUID as fallback for serial if we couldn't get it from session
@@ -93,9 +89,11 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 
 	guidStr := fmt.Sprintf("%x", ov.Header.Val.GUID[:])
 
-	fmt.Printf("🔍 DEBUG: Final values - serial=%s, model=%s, guid=%s\n", serial, model, guidStr)
-	fmt.Printf("🔍 DEBUG: VoucherSigning.Mode=%v, VoucherUpload.Enabled=%v, PersistToDB=%v\n",
-		v.config.VoucherSigning.Mode, v.config.VoucherUpload.Enabled, v.config.PersistToDB)
+	slog.Debug("voucher persist parameters",
+		"serial", serial, "model", model, "guid", guidStr,
+		"signing_mode", v.config.VoucherSigning.Mode,
+		"upload_enabled", v.config.VoucherUpload.Enabled,
+		"persist_to_db", v.config.PersistToDB)
 
 	// Path to the voucher artifact saved for push transmission
 	var voucherFilePath string
@@ -111,18 +109,18 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 		// Static mode: use configured public key or DID for all devices
 		if v.config.OwnerSignover.StaticDID != "" {
 			// Handle static DID
-			fmt.Printf("🔧 DEBUG: Using static DID for signover: %s\n", v.config.OwnerSignover.StaticDID)
+			slog.Debug("using static DID for signover", "did", v.config.OwnerSignover.StaticDID)
 			// TODO: Implement DID resolution for static case
-			fmt.Printf("⚠️  Static DID resolution not yet implemented\n")
+			slog.Warn("static DID resolution not yet implemented")
 		} else if v.config.OwnerSignover.StaticPublicKey != "" {
 			// Handle static PEM key (existing logic)
 			nextOwner, err = parseStaticPublicKey(v.config.OwnerSignover.StaticPublicKey)
 			if err != nil {
 				return false, fmt.Errorf("failed to parse static public key: %w", err)
 			}
-			fmt.Printf("🔧 DEBUG: Using static owner key for signover\n")
+			slog.Debug("using static owner key for signover")
 		} else {
-			fmt.Printf("🔧 DEBUG: No static public key or DID configured - no owner signover\n")
+			slog.Debug("no static public key or DID configured - no owner signover")
 		}
 
 	case "dynamic":
@@ -135,17 +133,13 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 			// Convert to crypto.PublicKey
 			nextOwner = ownerKeyResult.PublicKey.(crypto.PublicKey)
 			didURL = ownerKeyResult.DIDURL // Store DID URL for upload
-			fmt.Printf("🔧 DEBUG: Using dynamic owner key for signover\n")
-			// Store DID URL for upload if available
-			if ownerKeyResult.DIDURL != "" {
-				fmt.Printf("🔧 DEBUG: DID URL available for upload: %s\n", ownerKeyResult.DIDURL)
-			}
+			slog.Debug("using dynamic owner key for signover", "did_url", ownerKeyResult.DIDURL)
 		} else {
 			return false, fmt.Errorf("dynamic mode enabled but no external command configured")
 		}
 
 	default:
-		fmt.Printf("🔧 DEBUG: Unsupported owner signover mode: %s - no owner signover\n", v.config.OwnerSignover.Mode)
+		slog.Debug("unsupported owner signover mode - no owner signover", "mode", v.config.OwnerSignover.Mode)
 	}
 
 	// 2. Voucher signing if configured
@@ -166,7 +160,7 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 		v.voucherSigningService.SetSessionState(sessionState)
 
 		// Always call voucher signing - default mode is "internal" which lets go-fdo handle it
-		fmt.Printf("🔐 DEBUG: About to call SignVoucher with mode=%s, nextOwner=%v\n", v.config.VoucherSigning.Mode, nextOwner != nil)
+		slog.Debug("calling SignVoucher", "mode", v.config.VoucherSigning.Mode, "has_next_owner", nextOwner != nil)
 		signedVoucher, err := v.voucherSigningService.SignVoucher(ctx, ov, nextOwner, serial, model, extraData)
 		if err != nil {
 			return false, fmt.Errorf("voucher signing failed: %w", err)
@@ -230,7 +224,7 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 
 	// 3. Save to disk if configured
 	if v.config.SaveToDisk.Directory != "" {
-		if err := v.voucherDiskService.SaveVoucherToDisk(ov, serial); err != nil {
+		if err := v.voucherDiskService.SaveVoucherToDisk(ov); err != nil {
 			fmt.Printf("⚠️  Failed to save voucher to disk: %v\n", err)
 			// Don't fail the entire operation for disk save errors
 		}
@@ -238,7 +232,7 @@ func (v *VoucherCallbackService) BeforeVoucherPersist(ctx context.Context, sessi
 
 	// 4. Return persistence decision
 	result := v.config.PersistToDB
-	fmt.Printf("🔍 DEBUG: Returning persist=%v from BeforeVoucherPersist\n", result)
+	slog.Debug("BeforeVoucherPersist complete", "persist", result)
 	return result, nil
 }
 

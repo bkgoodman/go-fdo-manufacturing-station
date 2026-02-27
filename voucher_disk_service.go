@@ -29,8 +29,9 @@ func NewVoucherDiskService(config *VoucherConfig) *VoucherDiskService {
 	}
 }
 
-// SaveVoucherToDisk saves an ownership voucher to disk in the format used by go-fdo command-line tools
-func (v *VoucherDiskService) SaveVoucherToDisk(ov *fdo.Voucher, serialNumber string) error {
+// SaveVoucherToDisk saves an ownership voucher to disk in the format used by go-fdo command-line tools.
+// Files are named by GUID (hex-encoded) per library convention.
+func (v *VoucherDiskService) SaveVoucherToDisk(ov *fdo.Voucher) error {
 	if v.config.SaveToDisk.Directory == "" {
 		// Directory not specified, disk saving disabled
 		return nil
@@ -41,8 +42,9 @@ func (v *VoucherDiskService) SaveVoucherToDisk(ov *fdo.Voucher, serialNumber str
 		return fmt.Errorf("failed to create voucher directory: %w", err)
 	}
 
-	// Generate filename using serial number
-	filename := fmt.Sprintf("%s.fdoov", serialNumber)
+	// Generate filename using GUID (not serial number)
+	guid := fmt.Sprintf("%x", ov.Header.Val.GUID[:])
+	filename := fmt.Sprintf("%s.fdoov", guid)
 	filepath := filepath.Join(v.config.SaveToDisk.Directory, filename)
 
 	// Convert voucher to the same format as go-fdo command-line tools

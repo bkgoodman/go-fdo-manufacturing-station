@@ -5,9 +5,12 @@ package main
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
 	"os"
 
+	fdo "github.com/fido-device-onboard/go-fdo"
+	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/transfer"
 )
 
@@ -33,9 +36,20 @@ func (c *VoucherPushClient) Push(ctx context.Context, dest *VoucherDestination, 
 		return fmt.Errorf("destination missing URL")
 	}
 
-	raw, err := os.ReadFile(filePath)
+	fileData, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read voucher file %s: %w", filePath, err)
+	}
+
+	// Voucher files are PEM-encoded; decode to get raw CBOR bytes
+	raw := fileData
+	if block, _ := pem.Decode(fileData); block != nil {
+		raw = block.Bytes
+	}
+
+	var ov fdo.Voucher
+	if err := cbor.Unmarshal(raw, &ov); err != nil {
+		return fmt.Errorf("failed to decode voucher from %s: %w", filePath, err)
 	}
 
 	data := &transfer.VoucherData{
@@ -44,7 +58,8 @@ func (c *VoucherPushClient) Push(ctx context.Context, dest *VoucherDestination, 
 			SerialNumber: serial,
 			ModelNumber:  model,
 		},
-		Raw: raw,
+		Voucher: &ov,
+		Raw:     raw,
 	}
 
 	pushDest := transfer.PushDestination{

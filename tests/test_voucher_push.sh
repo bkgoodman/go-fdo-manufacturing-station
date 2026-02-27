@@ -115,10 +115,24 @@ if [ ! -f "$EXPECTED_RECEIVER_FILE" ]; then
     exit 1
 fi
 
-if ! cmp -s "$SOURCE_FILE" "$EXPECTED_RECEIVER_FILE"; then
+# Source files are PEM-encoded; the push pipeline sends raw CBOR.
+# Extract the CBOR payload from PEM for comparison.
+SOURCE_CBOR="$(mktemp)"
+if head -1 "$SOURCE_FILE" | grep -q "^-----BEGIN"; then
+    sed '/^-----/d' "$SOURCE_FILE" | tr -d '\n' | base64 -d > "$SOURCE_CBOR" 2>/dev/null \
+        || { printf "❌ Failed to decode PEM source\n"; rm -f "$SOURCE_CBOR"; exit 1; }
+else
+    cp "$SOURCE_FILE" "$SOURCE_CBOR"
+fi
+
+if ! cmp -s "$SOURCE_CBOR" "$EXPECTED_RECEIVER_FILE"; then
     printf "❌ Voucher file mismatch between disk store and receiver\n"
+    printf "   source (decoded) size: %s\n" "$(wc -c < "$SOURCE_CBOR")"
+    printf "   received size:         %s\n" "$(wc -c < "$EXPECTED_RECEIVER_FILE")"
+    rm -f "$SOURCE_CBOR"
     exit 1
 fi
+rm -f "$SOURCE_CBOR"
 printf "✅ Voucher payload matches between disk and receiver\n"
 
 META_FILE="$RECEIVER_DIR/$GUID.json"

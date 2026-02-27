@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log"
 	"log/slog"
 	"math/big"
 	"net"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/fido-device-onboard/go-fdo"
+	"github.com/fido-device-onboard/go-fdo/cbor"
 	"github.com/fido-device-onboard/go-fdo/custom"
 	transport "github.com/fido-device-onboard/go-fdo/http"
 	"github.com/fido-device-onboard/go-fdo/protocol"
@@ -211,7 +213,6 @@ func main() {
 	// Load configuration
 	var err error
 	config, err = LoadConfig(*configPath)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
 		os.Exit(1)
@@ -339,7 +340,6 @@ func runManufacturingStation(ctx context.Context) error {
 
 	// Open database
 	state, err := sqlite.Open(config.Database.Path, config.Database.Password)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return fmt.Errorf("error opening database: %w", err)
 	}
@@ -386,22 +386,18 @@ func runManufacturingStation(ctx context.Context) error {
 func generateManufacturingKeys(state *sqlite.DB) error {
 	// Generate manufacturing component keys (these act as the Device CA)
 	rsa2048MfgKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
 	rsa3072MfgKey, err := rsa.GenerateKey(rand.Reader, 3072)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
 	ec256MfgKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
 	ec384MfgKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
@@ -417,12 +413,10 @@ func generateManufacturingKeys(state *sqlite.DB) error {
 			IsCA:                  true,
 		}
 		der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
-		fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 		if err != nil {
 			return nil, err
 		}
 		cert, err := x509.ParseCertificate(der)
-		fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 		if err != nil {
 			return nil, err
 		}
@@ -430,22 +424,18 @@ func generateManufacturingKeys(state *sqlite.DB) error {
 	}
 
 	rsa2048Chain, err := generateCA(rsa2048MfgKey)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
 	rsa3072Chain, err := generateCA(rsa3072MfgKey)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
 	ec256Chain, err := generateCA(ec256MfgKey)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
 	ec384Chain, err := generateCA(ec384MfgKey)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return err
 	}
@@ -479,12 +469,10 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 	}
 
 	// Use Manufacturer key as device certificate authority
-	fmt.Printf("🔍 DEBUG: Getting manufacturer key...\n")
 	deviceCAKey, deviceCAChain, err := state.ManufacturerKey(ctx, protocol.Secp384r1KeyType, 0)
 	if err != nil {
 		return fmt.Errorf("error getting manufacturer key for device certificate authority: %w", err)
 	}
-	fmt.Printf("🔍 DEBUG: Manufacturer key retrieved successfully\n")
 
 	// Initialize voucher management services
 	ownerKeyExecutor := NewExternalCommandExecutor(config.VoucherManagement.OwnerSignover.ExternalCommand, config.VoucherManagement.OwnerSignover.Timeout)
@@ -593,13 +581,29 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 			},
 			AfterVoucherPersist: func(ctx context.Context, voucher fdo.Voucher) error { return nil },
 			RvInfo: func(ctx context.Context, voucher *fdo.Voucher) ([][]protocol.RvInstruction, error) {
-				// If no entries configured, return nil (no rendezvous info)
-				if len(config.Rendezvous.Entries) == 0 {
-					return nil, nil
-				}
-
 				// Convert each entry to protocol.RvInstruction format
 				var allDirectives [][]protocol.RvInstruction
+
+				// FIDO IoT spec §5.3.1: Manufacturers MUST include a
+				// RendezvousDirective containing RVDns "rvserver.local".
+				// Auto-prepend if the user hasn't included it.
+				hasLocal := false
+				for _, entry := range config.Rendezvous.Entries {
+					if entry.Host == "rvserver.local" {
+						hasLocal = true
+						break
+					}
+				}
+				if !hasLocal {
+					log.Printf("WARNING: auto-adding rvserver.local directive per FIDO IoT spec §5.3.1 (add it to your config to suppress this warning)")
+					dnsBytes, err := cbor.Marshal("rvserver.local")
+					if err != nil {
+						return nil, fmt.Errorf("failed to encode rvserver.local DNS: %w", err)
+					}
+					allDirectives = append(allDirectives, []protocol.RvInstruction{
+						{Variable: protocol.RVDns, Value: dnsBytes},
+					})
+				}
 
 				for i, entry := range config.Rendezvous.Entries {
 					// Validate entry
@@ -618,68 +622,58 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 
 					// Determine if host is IP address or DNS name
 					if ip := net.ParseIP(entry.Host); ip != nil {
-						// It's an IP address - encode as CBOR byte array with 0x50 prefix
-						ipBytes := []byte(ip)
-						cborIP := make([]byte, 1+len(ipBytes))
-						cborIP[0] = 0x50 // CBOR byte array prefix
-						copy(cborIP[1:], ipBytes)
+						// Use IPv4 form if possible
+						if ip4 := ip.To4(); ip4 != nil {
+							ip = ip4
+						}
+						ipBytes, err := cbor.Marshal([]byte(ip))
+						if err != nil {
+							return nil, fmt.Errorf("rendezvous entry %d: failed to encode IP: %w", i+1, err)
+						}
 						rvInstructions = append(rvInstructions, protocol.RvInstruction{
 							Variable: protocol.RVIPAddress,
-							Value:    cborIP, // CBOR byte array with 0x50 prefix
+							Value:    ipBytes,
 						})
 					} else {
 						// It's a DNS name
+						dnsBytes, err := cbor.Marshal(entry.Host)
+						if err != nil {
+							return nil, fmt.Errorf("rendezvous entry %d: failed to encode DNS: %w", i+1, err)
+						}
 						rvInstructions = append(rvInstructions, protocol.RvInstruction{
 							Variable: protocol.RVDns,
-							Value:    []byte(entry.Host),
+							Value:    dnsBytes,
 						})
 					}
 
-					// Add port - use RVDevPort for device and encode as CBOR integer
-					var portBytes []byte
-					if entry.Port <= 23 {
-						// Single byte for small integers
-						portBytes = []byte{byte(entry.Port)}
-					} else if entry.Port <= 0xFF {
-						// Two bytes: major type 0, additional info 24, followed by value
-						portBytes = []byte{0x18, byte(entry.Port)}
-					} else if entry.Port <= 0xFFFF {
-						// Three bytes: major type 0, additional info 25, followed by 2-byte value
-						portBytes = []byte{0x19, byte(entry.Port >> 8), byte(entry.Port)}
-					} else {
-						// Four bytes: major type 0, additional info 26, followed by 4-byte value
-						portBytes = []byte{0x1A,
-							byte(entry.Port >> 24),
-							byte(entry.Port >> 16),
-							byte(entry.Port >> 8),
-							byte(entry.Port)}
+					// Add port for both device and owner parsers
+					portBytes, err := cbor.Marshal(uint16(entry.Port))
+					if err != nil {
+						return nil, fmt.Errorf("rendezvous entry %d: failed to encode port: %w", i+1, err)
 					}
 					rvInstructions = append(rvInstructions, protocol.RvInstruction{
-						Variable: protocol.RVDevPort, // Fix: Use RVDevPort (3) instead of RVOwnerPort (4)
-						Value:    portBytes,          // Fix: Proper CBOR integer encoding
+						Variable: protocol.RVDevPort,
+						Value:    portBytes,
+					})
+					rvInstructions = append(rvInstructions, protocol.RvInstruction{
+						Variable: protocol.RVOwnerPort,
+						Value:    portBytes,
 					})
 
-					// Add protocol - encode as CBOR unsigned integer, not ASCII string
-					var protocolValue int
-					if entry.Scheme == "http" {
-						protocolValue = 1 // HTTP (RVProtHTTP = 1)
+					// Add protocol
+					var protocolValue uint8
+					if entry.Scheme == "https" {
+						protocolValue = 2
 					} else {
-						protocolValue = 2 // HTTPS (RVProtHTTPS = 2)
+						protocolValue = 1
 					}
-
-					// Encode protocol as CBOR unsigned integer
-					var protocolBytes []byte
-					if protocolValue <= 23 {
-						// Single byte for small integers
-						protocolBytes = []byte{byte(protocolValue)}
-					} else {
-						// For larger values (not needed for 2 or 3)
-						protocolBytes = []byte{0x18, byte(protocolValue)}
+					protoBytes, err := cbor.Marshal(protocolValue)
+					if err != nil {
+						return nil, fmt.Errorf("rendezvous entry %d: failed to encode protocol: %w", i+1, err)
 					}
-
 					rvInstructions = append(rvInstructions, protocol.RvInstruction{
 						Variable: protocol.RVProtocol,
-						Value:    protocolBytes, // Fix: CBOR unsigned integer, not ASCII string
+						Value:    protoBytes,
 					})
 
 					// Add this directive to the list
@@ -719,18 +713,15 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 
 	// Listen and serve
 	lis, err := net.Listen("tcp", config.Server.Addr)
-	fmt.Printf("DEBUG: Config loaded: %+v\n", config)
 	if err != nil {
 		return fmt.Errorf("error listening on %s: %w", config.Server.Addr, err)
 	}
 	defer func() { _ = lis.Close() }()
 
-	fmt.Printf("🔍 DEBUG: About to start server on %s\n", lis.Addr().String())
 	slog.Info("FDO Manufacturing Station starting",
 		"local", lis.Addr().String(),
 		"external", extAddr,
 		"mode", "DI-only")
-	fmt.Printf("🔍 DEBUG: Server started successfully\n")
 
 	// Start server in goroutine to monitor context cancellation
 	errChan := make(chan error, 1)
