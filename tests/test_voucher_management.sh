@@ -98,7 +98,7 @@ main() {
     echo "=== Test 1: Basic External Handler (Echo) ==="
     run_server "tests/config_mock_test.cfg" "Basic Test"
     run_client "Basic Test"
-    check_output "Basic Test" "Voucher"
+    check_output "Basic Test" "voucher retry worker started"
     stop_server
     
     echo ""
