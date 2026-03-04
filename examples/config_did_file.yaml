@@ -58,3 +58,16 @@ voucher_management:
     enabled: false
     external_command: ""
     timeout: 30s
+  
+  push_service:
+    enabled: false
+    url: "http://localhost:9090/vouchers"
+    auth_token: ""  # Static token (fallback if FDOKeyAuth fails)
+    auth_method: "both"  # "static" | "fdokeyauth" | "both"
+    supplier_key_type: "ec384"  # Key type for FDOKeyAuth (uses manufacturer key by default)
+    supplier_key_file: ""  # Optional: PEM file with supplier private key (uses manufacturer key if empty)
+    mode: "fallback"
+    retain_files: true
+    delete_after_success: false
+    retry_interval: 8h
+    max_attempts: 5

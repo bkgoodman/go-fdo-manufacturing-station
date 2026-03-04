@@ -150,6 +150,9 @@ func DefaultConfig() *Config {
 				Enabled            bool          `yaml:"enabled"`
 				URL                string        `yaml:"url"`
 				AuthToken          string        `yaml:"auth_token"`
+				AuthMethod         string        `yaml:"auth_method"`
+				SupplierKeyType    string        `yaml:"supplier_key_type"`
+				SupplierKeyFile    string        `yaml:"supplier_key_file"`
 				Mode               string        `yaml:"mode"`
 				RetainFiles        bool          `yaml:"retain_files"`
 				DeleteAfterSuccess bool          `yaml:"delete_after_success"`
@@ -159,6 +162,9 @@ func DefaultConfig() *Config {
 				Enabled:            false,
 				URL:                "",
 				AuthToken:          "",
+				AuthMethod:         "both",
+				SupplierKeyType:    "ec384",
+				SupplierKeyFile:    "",
 				Mode:               "fallback",
 				RetainFiles:        true,
 				DeleteAfterSuccess: false,

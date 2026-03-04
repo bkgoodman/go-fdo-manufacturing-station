@@ -137,7 +137,7 @@ func runVoucherRetransmit(ctx context.Context, state *sqlite.DB, store *VoucherT
 		didResolver = NewDIDResolver(state.DB(), &config.VoucherManagement.DIDCache)
 	}
 	destinationResolver := NewVoucherDestinationResolver(&config.VoucherManagement, callbackExecutor, didResolver)
-	pushClient := NewVoucherPushClient()
+	pushClient := NewVoucherPushClient(&config.VoucherManagement, state)
 	pushService := NewVoucherPushService(&config.VoucherManagement, store, destinationResolver, pushClient)
 
 	slog.Info("manual voucher retransmit requested",
@@ -513,7 +513,7 @@ func startDIServer(ctx context.Context, state *sqlite.DB) error {
 		didResolver = NewDIDResolver(state.DB(), &config.VoucherManagement.DIDCache)
 	}
 	destinationResolver := NewVoucherDestinationResolver(&config.VoucherManagement, callbackExecutor, didResolver)
-	voucherPushClient := NewVoucherPushClient()
+	voucherPushClient := NewVoucherPushClient(&config.VoucherManagement, state)
 	voucherPushService := NewVoucherPushService(&config.VoucherManagement, transmissionStore, destinationResolver, voucherPushClient)
 	voucherRetryWorker := NewVoucherRetryWorker(&config.VoucherManagement, transmissionStore, voucherPushService)
 	voucherRetryWorker.Start(ctx)

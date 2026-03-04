@@ -82,7 +82,10 @@ type VoucherConfig struct {
 		Enabled            bool          `yaml:"enabled"`
 		URL                string        `yaml:"url"`
 		AuthToken          string        `yaml:"auth_token"`
-		Mode               string        `yaml:"mode"` // "fallback" or "send_always"
+		AuthMethod         string        `yaml:"auth_method"`       // "static" | "fdokeyauth" | "both"
+		SupplierKeyType    string        `yaml:"supplier_key_type"` // Key type for FDOKeyAuth (e.g., "ec384")
+		SupplierKeyFile    string        `yaml:"supplier_key_file"` // PEM file with supplier private key
+		Mode               string        `yaml:"mode"`              // "fallback" or "send_always"
 		RetainFiles        bool          `yaml:"retain_files"`
 		DeleteAfterSuccess bool          `yaml:"delete_after_success"`
 		RetryInterval      time.Duration `yaml:"retry_interval"`
